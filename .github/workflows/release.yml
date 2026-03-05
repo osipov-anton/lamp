@@ -2,9 +2,8 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -12,6 +11,7 @@ permissions:
 jobs:
   release-mac:
     runs-on: macos-latest
+    environment: production
 
     steps:
       - name: Checkout
@@ -38,6 +38,7 @@ jobs:
 
   release-win:
     runs-on: windows-latest
+    environment: production
 
     steps:
       - name: Checkout
