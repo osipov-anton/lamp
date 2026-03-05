@@ -1,0 +1,6 @@
+# Default owner for the entire repository
+* @osipov-anton
+
+# Critical CI/CD and security configuration must be owner-reviewed
+.github/workflows/* @osipov-anton
+.github/CODEOWNERS @osipov-anton
