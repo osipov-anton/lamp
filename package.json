@@ -49,7 +49,6 @@
     "@tailwindcss/vite": "^4.2.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "electron-liquid-glass": "^1.1.1",
     "electron-updater": "^6.6.2",
     "hugeicons-react": "^0.4.0",
     "lucide-react": "^0.577.0",
