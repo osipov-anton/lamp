@@ -24,7 +24,8 @@
       {
         "provider": "github",
         "owner": "osipov-anton",
-        "repo": "lamp"
+        "repo": "lamp",
+        "releaseType": "release"
       }
     ],
     "mac": {
