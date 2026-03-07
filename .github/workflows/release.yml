@@ -30,6 +30,9 @@ jobs:
         run: npm ci
 
       - name: Build app
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: npm run build
 
       - name: Build and publish macOS
@@ -67,6 +70,9 @@ jobs:
           npm install
 
       - name: Build app
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: npm run build
 
       - name: Build and publish Windows
