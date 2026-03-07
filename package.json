@@ -18,6 +18,7 @@
     "productName": "Lamp AI",
     "files": [
       "out/**/*",
+      "resources/**/*",
       "package.json"
     ],
     "publish": [
