@@ -17,6 +17,16 @@ import {
   createTelegramSearchMessagesTool,
   ALL_TELEGRAM_TOOL_IDS
 } from './tools/telegramTools'
+import {
+  createGmailListEmailsTool,
+  createGmailReadEmailTool,
+  createGmailSendEmailTool,
+  createGmailSearchEmailsTool,
+  createGcalListEventsTool,
+  createGcalCreateEventTool,
+  createGcalGetEventTool,
+  ALL_GOOGLE_TOOL_IDS
+} from './tools/googleTools'
 import { SupervisorRouter } from './orchestrator/SupervisorRouter'
 import type { AgentDefinition } from './runtime/types'
 import { getChats, getSettings } from '../store'
@@ -26,6 +36,7 @@ import { FactExtractionService } from './memory/FactExtractionService'
 import { PromptContextComposer } from './memory/PromptContextComposer'
 import { MemoryGraphService } from './memory/MemoryGraphService'
 import { getTelegramService } from '../telegram'
+import { getGoogleService } from '../google'
 
 export interface AgentSystem {
   bus: ArtifactBus
@@ -54,7 +65,7 @@ function createDefaultAgent(): AgentDefinition {
       'You are Lamp, a helpful AI assistant. Be concise and accurate. Use web_search for real-time information, memory_query for user/fact memory retrieval, and search_messages for raw chat history lookup.',
     modelConfig: { model },
     maxIterations: 10,
-    allowedTools: ['web_search', 'search_messages', 'memory_query', ...ALL_TELEGRAM_TOOL_IDS],
+    allowedTools: ['web_search', 'search_messages', 'memory_query', ...ALL_TELEGRAM_TOOL_IDS, ...ALL_GOOGLE_TOOL_IDS],
     providerProfile: 'openrouter'
   }
 }
@@ -159,6 +170,15 @@ export function bootstrapAgentSystem(): AgentSystem {
   catalog.register(createTelegramReadMessagesTool(telegramService))
   catalog.register(createTelegramSendMessageTool(telegramService))
   catalog.register(createTelegramSearchMessagesTool(telegramService))
+
+  const googleService = getGoogleService()
+  catalog.register(createGmailListEmailsTool(googleService))
+  catalog.register(createGmailReadEmailTool(googleService))
+  catalog.register(createGmailSendEmailTool(googleService))
+  catalog.register(createGmailSearchEmailsTool(googleService))
+  catalog.register(createGcalListEventsTool(googleService))
+  catalog.register(createGcalCreateEventTool(googleService))
+  catalog.register(createGcalGetEventTool(googleService))
 
   const router = new SupervisorRouter({
     catalog,

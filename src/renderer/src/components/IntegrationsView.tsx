@@ -1,33 +1,27 @@
 import { useState, useEffect } from 'react'
-import { Mail, Calendar, Heart, Sparkles, CheckCircle2, ChevronRight, Zap } from 'lucide-react'
+import { Heart, Sparkles, CheckCircle2, ChevronRight, Zap } from 'lucide-react'
 import { Button } from './ui/button'
 import { ScrollArea } from './ui/scroll-area'
-import type { TelegramConnectionStatus } from '@renderer/types'
+import type { TelegramConnectionStatus, GoogleConnectionStatus } from '@renderer/types'
 import telegramLogo from '../assets/telegram.png'
 
 interface IntegrationsViewProps {
   onOpenTelegramAuth: () => void
+  onOpenGoogleAuth: () => void
+}
+
+function GoogleLogo({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none">
+      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+    </svg>
+  )
 }
 
 const comingSoonIntegrations = [
-  {
-    id: 'gmail',
-    name: 'Gmail',
-    provider: 'Google',
-    description: 'Read and reply to your emails directly from the chat.',
-    icon: Mail,
-    color: 'bg-red-500/10 text-red-500',
-    category: 'Productivity'
-  },
-  {
-    id: 'google-calendar',
-    name: 'Google Calendar',
-    provider: 'Google',
-    description: 'Manage your schedule, create events, and get reminders.',
-    icon: Calendar,
-    color: 'bg-blue-500/10 text-blue-500',
-    category: 'Productivity'
-  },
   {
     id: 'health',
     name: 'Apple Health',
@@ -39,8 +33,9 @@ const comingSoonIntegrations = [
   }
 ] as const
 
-export function IntegrationsView({ onOpenTelegramAuth }: IntegrationsViewProps) {
+export function IntegrationsView({ onOpenTelegramAuth, onOpenGoogleAuth }: IntegrationsViewProps) {
   const [telegramStatus, setTelegramStatus] = useState<TelegramConnectionStatus>('disconnected')
+  const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus>('disconnected')
 
   useEffect(() => {
     window.api.telegram.getStatus().then(setTelegramStatus)
@@ -48,7 +43,14 @@ export function IntegrationsView({ onOpenTelegramAuth }: IntegrationsViewProps) 
     return unsub
   }, [])
 
+  useEffect(() => {
+    window.api.google.getStatus().then(setGoogleStatus)
+    const unsub = window.api.google.onStatusChanged(setGoogleStatus)
+    return unsub
+  }, [])
+
   const isTelegramConnected = telegramStatus === 'connected'
+  const isGoogleConnected = googleStatus === 'connected'
 
   return (
     <div className="flex-1 min-h-0 flex flex-col h-full bg-background overflow-hidden relative">
@@ -88,7 +90,6 @@ export function IntegrationsView({ onOpenTelegramAuth }: IntegrationsViewProps) 
             <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-6">
               {/* Telegram Integration Card */}
               <div className="group relative flex flex-col justify-between overflow-hidden rounded-[2rem] border border-border/40 bg-background/40 p-7 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl transition-all duration-500 hover:shadow-[0_8px_30px_rgba(0,136,204,0.12)] hover:border-[#0088cc]/30">
-                {/* Background glow effect */}
                 <div className="absolute -top-24 -right-24 h-48 w-48 rounded-full bg-[#0088cc]/20 blur-[3rem] transition-all duration-500 group-hover:bg-[#0088cc]/30 group-hover:scale-110" />
                 
                 <div className="relative z-10">
@@ -125,6 +126,50 @@ export function IntegrationsView({ onOpenTelegramAuth }: IntegrationsViewProps) 
                     onClick={onOpenTelegramAuth}
                   >
                     {isTelegramConnected ? 'Manage' : 'Connect'}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Google Integration Card */}
+              <div className="group relative flex flex-col justify-between overflow-hidden rounded-[2rem] border border-border/40 bg-background/40 p-7 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl transition-all duration-500 hover:shadow-[0_8px_30px_rgba(66,133,244,0.12)] hover:border-[#4285F4]/30">
+                <div className="absolute -top-20 -right-20 h-40 w-40 rounded-full bg-[#4285F4]/15 blur-[3rem] transition-all duration-500 group-hover:bg-[#4285F4]/25 group-hover:scale-110" />
+                <div className="absolute -bottom-16 -left-16 h-32 w-32 rounded-full bg-[#34A853]/10 blur-[2.5rem] transition-all duration-500 group-hover:bg-[#34A853]/20 group-hover:scale-105" />
+                <div className="absolute top-1/2 right-10 h-24 w-24 rounded-full bg-[#FBBC05]/8 blur-[2rem] transition-all duration-500 group-hover:bg-[#FBBC05]/15" />
+                
+                <div className="relative z-10">
+                  <div className="mb-6 inline-flex size-16 items-center justify-center rounded-2xl bg-gradient-to-b from-white/[0.08] to-white/[0.03] p-3.5 shadow-inner ring-1 ring-white/10 dark:ring-white/5">
+                    <GoogleLogo className="size-full drop-shadow-sm transition-transform duration-500 group-hover:scale-110" />
+                  </div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <h3 className="font-semibold text-xl tracking-tight">Google</h3>
+                    {isGoogleConnected ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]">
+                        <CheckCircle2 className="size-3.5" />
+                        Connected
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/50 px-3 py-1 text-[11px] font-medium text-muted-foreground ring-1 ring-border/50">
+                        <Zap className="size-3.5" />
+                        New
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm font-medium text-[#4285F4]/80 mb-3">Email & Calendar</p>
+                  <p className="text-sm text-muted-foreground/80 leading-relaxed line-clamp-2">
+                    Access Gmail and Google Calendar through the assistant. Read emails, manage events, and stay organized.
+                  </p>
+                </div>
+
+                <div className="relative z-10 mt-8 pt-6 border-t border-border/40 flex items-center justify-between">
+                  <div className="text-xs text-muted-foreground/60 font-medium tracking-wide uppercase">
+                    By Lamp AI
+                  </div>
+                  <Button
+                    variant={isGoogleConnected ? "secondary" : "default"}
+                    className="rounded-full px-6 shadow-sm transition-transform active:scale-95 font-medium"
+                    onClick={onOpenGoogleAuth}
+                  >
+                    {isGoogleConnected ? 'Manage' : 'Connect'}
                   </Button>
                 </div>
               </div>

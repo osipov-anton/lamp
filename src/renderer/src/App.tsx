@@ -5,6 +5,7 @@ import { ChatView } from './components/ChatView'
 import { SettingsDialog } from './components/SettingsDialog'
 import { IntegrationsView } from './components/IntegrationsView'
 import { TelegramAuthDialog } from './components/TelegramAuthDialog'
+import { GoogleAuthDialog } from './components/GoogleAuthDialog'
 import { CommandPalette } from './components/CommandPalette'
 import { useChats } from './hooks/useChats'
 import { useAgentRun } from './hooks/useAgentRun'
@@ -40,6 +41,7 @@ function App(): JSX.Element {
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [telegramAuthOpen, setTelegramAuthOpen] = useState(false)
+  const [googleAuthOpen, setGoogleAuthOpen] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   
   const [currentView, setCurrentView] = useState<'chat' | 'integrations'>('chat')
@@ -147,7 +149,10 @@ function App(): JSX.Element {
             onNewChat={handleNewChat}
           />
         ) : (
-          <IntegrationsView onOpenTelegramAuth={() => setTelegramAuthOpen(true)} />
+          <IntegrationsView
+            onOpenTelegramAuth={() => setTelegramAuthOpen(true)}
+            onOpenGoogleAuth={() => setGoogleAuthOpen(true)}
+          />
         )}
         <CommandPalette
           open={commandPaletteOpen}
@@ -162,6 +167,7 @@ function App(): JSX.Element {
         />
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
         <TelegramAuthDialog open={telegramAuthOpen} onOpenChange={setTelegramAuthOpen} />
+        <GoogleAuthDialog open={googleAuthOpen} onOpenChange={setGoogleAuthOpen} />
       </div>
     </TooltipProvider>
   )

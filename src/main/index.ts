@@ -10,9 +10,11 @@ import icon from '../../resources/icon.png?asset'
 import { registerChatHandlers } from './ipc/chat'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerTelegramHandlers } from './ipc/telegram'
+import { registerGoogleHandlers } from './ipc/google'
 import { bootstrapAgentSystem } from './agent/bootstrap'
 import { bridgeAgentEventsToIPC } from './ipc/agent'
 import { getTelegramService } from './telegram'
+import { getGoogleService } from './google'
 
 function setupAutoUpdates(): void {
   if (!app.isPackaged) return
@@ -142,6 +144,12 @@ app.whenReady().then(() => {
     registerTelegramHandlers(telegramService)
     void telegramService.tryRestoreSession().then((restored) => {
       if (restored) console.log('[telegram] session restored successfully')
+    })
+
+    const googleService = getGoogleService()
+    registerGoogleHandlers(googleService)
+    void googleService.tryRestoreSession().then((restored) => {
+      if (restored) console.log('[google] session restored successfully')
     })
   } catch (err) {
     console.error('[app] bootstrap failed, opening window anyway:', err)

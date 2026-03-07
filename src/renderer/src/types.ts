@@ -222,6 +222,22 @@ export interface TelegramAPI {
   onStatusChanged: (cb: (status: TelegramConnectionStatus) => void) => () => void
 }
 
+export type GoogleConnectionStatus = 'disconnected' | 'connecting' | 'connected'
+
+export interface GoogleUserInfo {
+  email: string
+  name: string
+  picture?: string
+}
+
+export interface GoogleAPI {
+  startAuth: () => Promise<void>
+  disconnect: () => Promise<void>
+  getStatus: () => Promise<GoogleConnectionStatus>
+  getUserInfo: () => Promise<GoogleUserInfo | null>
+  onStatusChanged: (cb: (status: GoogleConnectionStatus) => void) => () => void
+}
+
 declare global {
   interface Window {
     api: {
@@ -229,6 +245,7 @@ declare global {
       agent: AgentAPI
       settings: SettingsAPI
       telegram: TelegramAPI
+      google: GoogleAPI
     }
   }
 }

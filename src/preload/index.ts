@@ -69,11 +69,27 @@ const telegramAPI = {
     ipcOn('telegram:status-changed', cb)
 }
 
+const googleAPI = {
+  startAuth: () => ipcRenderer.invoke('google:start-auth'),
+  disconnect: () => ipcRenderer.invoke('google:disconnect'),
+  getStatus: () =>
+    ipcRenderer.invoke('google:status') as Promise<
+      'disconnected' | 'connecting' | 'connected'
+    >,
+  getUserInfo: () =>
+    ipcRenderer.invoke('google:user-info') as Promise<
+      { email: string; name: string; picture?: string } | null
+    >,
+  onStatusChanged: (cb: (status: 'disconnected' | 'connecting' | 'connected') => void) =>
+    ipcOn('google:status-changed', cb)
+}
+
 const api = {
   chat: chatAPI,
   agent: agentAPI,
   settings: settingsAPI,
-  telegram: telegramAPI
+  telegram: telegramAPI,
+  google: googleAPI
 }
 
 if (process.contextIsolated) {

@@ -46,6 +46,9 @@ interface AppSettings {
   model: string
   proxyUrl: string
   telegramSession?: string
+  googleRefreshToken?: string
+  googleAccessToken?: string
+  googleTokenExpiry?: number
 }
 
 interface StoreData {
