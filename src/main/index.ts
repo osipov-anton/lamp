@@ -1,6 +1,11 @@
+import * as Sentry from '@sentry/electron/main'
 import { app, BrowserWindow, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
+
+Sentry.init({
+  dsn: 'https://5465066c9df057d27782bdb64b3464e0@logs.osipov.digital/34'
+})
 import icon from '../../resources/icon.png?asset'
 import { registerChatHandlers } from './ipc/chat'
 import { registerSettingsHandlers } from './ipc/settings'
