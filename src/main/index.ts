@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/electron/main'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
 
@@ -17,25 +17,26 @@ import { getTelegramService } from './telegram'
 function setupAutoUpdates(): void {
   if (!app.isPackaged) return
 
-  autoUpdater.on('checking-for-update', () => {
-    console.log('[updater] checking for updates')
-  })
-
-  autoUpdater.on('update-available', (info) => {
-    console.log('[updater] update available', info.version)
-  })
-
-  autoUpdater.on('update-not-available', () => {
-    console.log('[updater] no updates available')
-  })
-
-  autoUpdater.on('download-progress', (progress) => {
-    console.log(`[updater] download progress: ${Math.round(progress.percent)}%`)
-  })
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
 
   autoUpdater.on('update-downloaded', (info) => {
     console.log('[updater] update downloaded', info.version)
-    autoUpdater.quitAndInstall()
+
+    const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    dialog.showMessageBox(window ?? {}, {
+      type: 'info',
+      title: 'Update Available',
+      message: `Version ${info.version} is ready to install.`,
+      detail: 'The update will be applied after restart.',
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0,
+      cancelId: 1
+    }).then(({ response }) => {
+      if (response === 0) {
+        autoUpdater.quitAndInstall()
+      }
+    })
   })
 
   autoUpdater.on('error', (error) => {
@@ -43,6 +44,50 @@ function setupAutoUpdates(): void {
   })
 
   void autoUpdater.checkForUpdatesAndNotify()
+
+  setupAppMenu()
+}
+
+function checkForUpdatesManually(): void {
+  autoUpdater.once('update-not-available', () => {
+    const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    dialog.showMessageBox(window ?? {}, {
+      type: 'info',
+      title: 'No Updates',
+      message: 'You are using the latest version.',
+      buttons: ['OK']
+    })
+  })
+  void autoUpdater.checkForUpdates()
+}
+
+function setupAppMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        {
+          label: 'Check for Updates…',
+          click: () => checkForUpdatesManually()
+        },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' }
+  ]
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
 function createWindow(): void {
