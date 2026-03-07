@@ -61,6 +61,7 @@ jobs:
         shell: bash
 
       - name: Install dependencies
+        shell: bash
         run: |
           rm -f package-lock.json
           npm install
