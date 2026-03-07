@@ -78,20 +78,24 @@ app.whenReady().then(() => {
     app.dock?.setIcon(icon)
   }
 
-  const { bus, router, openRouterProvider, memoryGraph, factExtraction, promptComposer } = bootstrapAgentSystem()
+  try {
+    const { bus, router, openRouterProvider, memoryGraph, factExtraction, promptComposer } = bootstrapAgentSystem()
 
-  bridgeAgentEventsToIPC(bus, {
-    getRunContext: (runId) => router.getRunContextForRun(runId)
-  })
+    bridgeAgentEventsToIPC(bus, {
+      getRunContext: (runId) => router.getRunContextForRun(runId)
+    })
 
-  registerChatHandlers(router, openRouterProvider, memoryGraph, factExtraction, promptComposer)
-  registerSettingsHandlers()
+    registerChatHandlers(router, openRouterProvider, memoryGraph, factExtraction, promptComposer)
+    registerSettingsHandlers()
 
-  const telegramService = getTelegramService()
-  registerTelegramHandlers(telegramService)
-  void telegramService.tryRestoreSession().then((restored) => {
-    if (restored) console.log('[telegram] session restored successfully')
-  })
+    const telegramService = getTelegramService()
+    registerTelegramHandlers(telegramService)
+    void telegramService.tryRestoreSession().then((restored) => {
+      if (restored) console.log('[telegram] session restored successfully')
+    })
+  } catch (err) {
+    console.error('[app] bootstrap failed, opening window anyway:', err)
+  }
 
   createWindow()
   setupAutoUpdates()
