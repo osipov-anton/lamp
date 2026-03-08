@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type {
+  AgentToolResultPayload,
+  MemoryQueryHit,
   RunState,
   ToolCallState,
   AgentRuntimePhase,
@@ -121,6 +123,34 @@ export function useAgentRun(activeChatId: string | null, activeThreadId: string 
       })
     })
 
+    const unsubToolResult = window.api.agent.onToolResult((data) => {
+      const payload = data as AgentToolResultPayload
+      if (payload.chatId !== activeChatId) return
+      if (payload.threadId !== activeThreadId) return
+      const key = `${payload.runId}:${payload.callId}`
+
+      setRun((prev) => ({
+        ...prev,
+        toolCalls: prev.toolCalls.map((tc) =>
+          tc.key === key
+            ? {
+                ...tc,
+                result: {
+                  success: true,
+                  content: payload.text,
+                  memoryQueryHits:
+                    payload.toolId === 'memory_query'
+                      ? parseMemoryQueryHits(payload.text)
+                      : tc.result?.memoryQueryHits,
+                  imagePath: tc.result?.imagePath,
+                  error: tc.result?.error
+                }
+              }
+            : tc
+        )
+      }))
+    })
+
     const unsubRunState = window.api.agent.onRunState((data) => {
       console.log('[useAgentRun] run-state event:', data)
       if (data.chatId !== activeChatId) return
@@ -182,6 +212,7 @@ export function useAgentRun(activeChatId: string | null, activeThreadId: string 
       unsubStreamChunk()
       unsubThinking()
       unsubToolLifecycle()
+      unsubToolResult()
       unsubRunState()
       unsubRunComplete()
       unsubRunError()
@@ -189,4 +220,25 @@ export function useAgentRun(activeChatId: string | null, activeThreadId: string 
   }, [activeChatId, activeThreadId, reset])
 
   return { run, isActive, reset }
+}
+
+function parseMemoryQueryHits(text: string): MemoryQueryHit[] | undefined {
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (!Array.isArray(parsed)) return undefined
+    return parsed
+      .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+      .map((item) => ({
+        factId: String(item.factId ?? ''),
+        statement: String(item.statement ?? ''),
+        factType: String(item.factType ?? ''),
+        confidence: Number(item.confidence ?? 0),
+        priority: Number(item.priority ?? 0),
+        score: Number(item.score ?? 0),
+        source: item.source === 'related' ? 'related' : undefined
+      }))
+      .filter((item) => item.factId.length > 0 && item.statement.length > 0)
+  } catch {
+    return undefined
+  }
 }

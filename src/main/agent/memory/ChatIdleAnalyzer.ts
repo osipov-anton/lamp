@@ -1,7 +1,13 @@
 import type { SupervisorRouter } from '../orchestrator/SupervisorRouter'
-import type { NormalizedMessage } from '../runtime/types'
+import { buildMemoryCuratorSystemPrompt } from '../bootstrap'
 
-type MessageProvider = (chatId: string, threadId: string) => NormalizedMessage[]
+interface ThreadMessageSnapshot {
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string
+  timestamp?: number
+}
+
+type MessageProvider = (chatId: string, threadId: string) => ThreadMessageSnapshot[]
 
 export class ChatIdleAnalyzer {
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -28,15 +34,22 @@ export class ChatIdleAnalyzer {
     if (this.running.has(key)) return
     this.running.add(key)
     try {
+      const curator = this.router.getAgent('memory_curator')
+      if (curator) {
+        curator.systemPrompt = buildMemoryCuratorSystemPrompt(new Date())
+      }
+
       const history = this.getMessagesForThread(chatId, threadId)
       if (history.length === 0) return
       const maxWindow = 20
       const latest = history.slice(-maxWindow)
       const task =
+        `Current date: ${new Date().toISOString()}\n\n` +
         'Curate and clean memory from this thread history. Extract important facts, merge duplicates, archive stale ones.' +
+        '\nUse the message timestamps when judging recency and whether facts may be outdated.' +
         '\n\nThread messages:\n' +
         latest
-          .map((msg) => `${msg.role}: ${msg.content ?? ''}`)
+          .map((msg) => `[${this.formatTimestamp(msg.timestamp)}] ${msg.role}: ${msg.content ?? ''}`)
           .join('\n')
 
       await this.router.executeRun('memory_curator', chatId, threadId, [
@@ -47,5 +60,10 @@ export class ChatIdleAnalyzer {
     } finally {
       this.running.delete(key)
     }
+  }
+
+  private formatTimestamp(timestamp?: number): string {
+    if (!Number.isFinite(timestamp)) return 'unknown-time'
+    return new Date(timestamp as number).toISOString()
   }
 }

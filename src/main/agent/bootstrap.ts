@@ -29,11 +29,10 @@ import {
 } from './tools/googleTools'
 import { SupervisorRouter } from './orchestrator/SupervisorRouter'
 import type { AgentDefinition } from './runtime/types'
-import { getChats, getSettings } from '../store'
+import { getSettings } from '../store'
 import { OramaMemoryGraphAdapter } from '../storage/adapters/orama/OramaMemoryGraphAdapter'
 import type { MemoryGraphPort } from '../storage/ports/MemoryGraphPort'
 import { FactExtractionService } from './memory/FactExtractionService'
-import { PromptContextComposer } from './memory/PromptContextComposer'
 import { MemoryGraphService } from './memory/MemoryGraphService'
 import { getTelegramService } from '../telegram'
 import { getGoogleService } from '../google'
@@ -46,8 +45,29 @@ export interface AgentSystem {
   openRouterProvider: OpenRouterProviderAdapter
   memoryGraph: MemoryGraphPort
   factExtraction: FactExtractionService
-  promptComposer: PromptContextComposer
   memoryGraphService: MemoryGraphService
+}
+
+export function buildMemoryCuratorSystemPrompt(now: Date = new Date()): string {
+  return (
+    'You are a memory curator agent. You are the ONLY way facts get created in the memory system.\n\n' +
+    `Current date: ${formatPromptDate(now)}\n\n` +
+    'YOUR WORKFLOW:\n' +
+    '1. Use search_messages to find recent conversations worth remembering\n' +
+    '2. Identify durable facts (preferences, relationships, plans, biographical info)\n' +
+    '3. Before creating any fact, ALWAYS use memory_query first to check if a similar fact already exists\n' +
+    '4. If memory_upsert_fact returns a WARNING about similar facts:\n' +
+    '   - If it IS a duplicate: skip it, or update the existing fact by passing its factId\n' +
+    '   - If it is genuinely different: call again with force=true\n' +
+    '5. Use memory_merge_entities to merge duplicate entities\n' +
+    '6. Use memory_archive_facts to archive stale or outdated facts\n\n' +
+    'RULES:\n' +
+    '- Only extract facts that are useful for future conversations\n' +
+    '- Keep fact statements concise and clear\n' +
+    '- Use the current date and message timestamps to judge recency, deadlines, and whether a fact may be stale\n' +
+    '- Always preserve provenance (sourceMessageIds)\n' +
+    '- Prefer updating existing facts over creating new duplicates'
+  )
 }
 
 function createDefaultAgent(): AgentDefinition {
@@ -62,7 +82,18 @@ function createDefaultAgent(): AgentDefinition {
     id: 'main',
     name: 'Lamp Assistant',
     systemPrompt:
-      'You are Lamp, a helpful AI assistant. Be concise and accurate. Use web_search for real-time information, memory_query for user/fact memory retrieval, and search_messages for raw chat history lookup.',
+      'You are Lamp, a helpful AI assistant. Be concise and accurate.\n\n' +
+      'MEMORY: At the start of every conversation turn, ALWAYS call memory_query to recall facts about the user and topic.\n' +
+      'How to use memory_query effectively:\n' +
+      '- Pass queries[] with 2-4 SHORT diverse search queries (3-5 words each)\n' +
+      '- Cover different angles: name variants, transliterations (e.g. "Елена" and "Elena"), related topics\n' +
+      '- Set expandRelated=true when asking about a person or entity to also get connected facts\n' +
+      '- Example: queries=["Elena Chasova", "Елена мама пользователя", "user mother"] expandRelated=true\n' +
+      'Do not skip this step.\n\n' +
+      'TOOLS:\n' +
+      '- memory_query: search stored facts and knowledge about the user (ALWAYS use proactively with multiple queries)\n' +
+      '- web_search: look up real-time information from the internet\n' +
+      '- search_messages: search raw chat history for past conversations',
     modelConfig: { model },
     maxIterations: 10,
     allowedTools: ['web_search', 'search_messages', 'memory_query', ...ALL_TELEGRAM_TOOL_IDS, ...ALL_GOOGLE_TOOL_IDS],
@@ -81,8 +112,7 @@ function createMemoryCuratorAgent(): AgentDefinition {
   return {
     id: 'memory_curator',
     name: 'Memory Curator',
-    systemPrompt:
-      'You are a memory curator agent. Maintain memory quality: extract durable facts, merge duplicates, archive stale facts, and preserve provenance to source messages.',
+    systemPrompt: buildMemoryCuratorSystemPrompt(),
     modelConfig: { model, temperature: 0.1 },
     maxIterations: 8,
     allowedTools: [
@@ -122,29 +152,7 @@ export function bootstrapAgentSystem(): AgentSystem {
     () => getSettings().openRouterApiKey,
     () => getSettings().proxyUrl
   )
-  const promptComposer = new PromptContextComposer(memoryGraph)
   const memoryGraphService = new MemoryGraphService(memoryGraph)
-
-  void memoryGraph.rebuildMessages(
-    getChats().flatMap((chat) =>
-      chat.threads.flatMap((thread) =>
-        thread.messages.map((message) => ({
-          chatId: chat.id,
-          threadId: thread.id,
-          chatTitle: chat.title,
-          messageId: message.id,
-          role: message.role,
-          content: message.content,
-          senderName: message.role === 'assistant' ? 'assistant' : 'user',
-          channelType: 'local_chat',
-          channelExternalId: '',
-          timestamp: message.timestamp
-        }))
-      )
-    )
-  ).catch((error) => {
-    console.error('[memory] failed to rebuild message index:', error)
-  })
 
   const catalog = new GlobalToolCatalog()
   catalog.register(
@@ -197,7 +205,10 @@ export function bootstrapAgentSystem(): AgentSystem {
     openRouterProvider,
     memoryGraph,
     factExtraction,
-    promptComposer,
     memoryGraphService
   }
+}
+
+function formatPromptDate(value: Date): string {
+  return value.toISOString()
 }

@@ -51,9 +51,19 @@ interface AppSettings {
   googleTokenExpiry?: number
 }
 
+export interface AgentPreset {
+  id: string
+  handle: string
+  name: string
+  prompt: string
+  createdAt: number
+  updatedAt: number
+}
+
 interface StoreData {
   chats: Chat[]
   settings: AppSettings
+  agentPresets: AgentPreset[]
 }
 
 const DEFAULT_DATA: StoreData = {
@@ -62,7 +72,8 @@ const DEFAULT_DATA: StoreData = {
     openRouterApiKey: '',
     model: 'openai/gpt-4o-mini',
     proxyUrl: ''
-  }
+  },
+  agentPresets: []
 }
 
 function getStorePath(): string {
@@ -278,6 +289,63 @@ export function saveSettings(settings: Partial<AppSettings>): void {
   writeStore(data)
 }
 
+export function getAgentPresets(): AgentPreset[] {
+  return readStore().agentPresets
+}
+
+export function getAgentPresetByHandle(handle: string): AgentPreset | null {
+  const lower = handle.toLowerCase()
+  return readStore().agentPresets.find((p) => p.handle === lower) ?? null
+}
+
+export function createAgentPreset(input: { handle: string; name: string; prompt: string }): AgentPreset {
+  const data = readStore()
+  const handle = input.handle.toLowerCase().replace(/[^a-z0-9_]/g, '')
+  if (data.agentPresets.some((p) => p.handle === handle)) {
+    throw new Error(`Agent with handle @${handle} already exists`)
+  }
+  const now = Date.now()
+  const preset: AgentPreset = {
+    id: crypto.randomUUID(),
+    handle,
+    name: input.name.trim(),
+    prompt: input.prompt.trim(),
+    createdAt: now,
+    updatedAt: now
+  }
+  data.agentPresets.push(preset)
+  writeStore(data)
+  return preset
+}
+
+export function updateAgentPreset(
+  id: string,
+  input: { handle?: string; name?: string; prompt?: string }
+): AgentPreset | null {
+  const data = readStore()
+  const preset = data.agentPresets.find((p) => p.id === id)
+  if (!preset) return null
+
+  if (input.handle !== undefined) {
+    const newHandle = input.handle.toLowerCase().replace(/[^a-z0-9_]/g, '')
+    if (data.agentPresets.some((p) => p.handle === newHandle && p.id !== id)) {
+      throw new Error(`Agent with handle @${newHandle} already exists`)
+    }
+    preset.handle = newHandle
+  }
+  if (input.name !== undefined) preset.name = input.name.trim()
+  if (input.prompt !== undefined) preset.prompt = input.prompt.trim()
+  preset.updatedAt = Date.now()
+  writeStore(data)
+  return preset
+}
+
+export function deleteAgentPreset(id: string): void {
+  const data = readStore()
+  data.agentPresets = data.agentPresets.filter((p) => p.id !== id)
+  writeStore(data)
+}
+
 function normalizeStoreData(input: StoreData): { data: StoreData; changed: boolean } {
   let changed = false
   const chats = (input.chats ?? []).map((chat) => {
@@ -296,10 +364,14 @@ function normalizeStoreData(input: StoreData): { data: StoreData; changed: boole
     changed = true
   }
 
+  const agentPresets = Array.isArray(input.agentPresets) ? input.agentPresets : []
+  if (!Array.isArray(input.agentPresets)) changed = true
+
   return {
     data: {
       chats,
-      settings
+      settings,
+      agentPresets
     },
     changed
   }

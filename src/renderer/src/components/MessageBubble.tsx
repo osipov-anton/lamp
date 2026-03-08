@@ -17,6 +17,7 @@ interface MessageBubbleProps {
   linkedThreads?: ChatThread[]
   onStartThread?: (messageId: string, selectedText?: string) => void
   onOpenThread?: (threadId: string) => void
+  onMentionClick?: (handle: string) => void
 }
 
 export function MessageBubble({
@@ -26,7 +27,8 @@ export function MessageBubble({
   showAvatar = true,
   linkedThreads,
   onStartThread,
-  onOpenThread
+  onOpenThread,
+  onMentionClick
 }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isAssistant = message.role === 'assistant'
@@ -122,7 +124,7 @@ export function MessageBubble({
         <div>
           {isUser ? (
             <>
-              {message.content ? <p className="whitespace-pre-wrap break-words">{message.content}</p> : null}
+              {message.content ? <UserMessageContent content={message.content} onMentionClick={onMentionClick} /> : null}
               {hasAttachments && (
                 <div className="mt-2 space-y-1.5">
                   {message.attachments?.map((attachment) => (
@@ -227,6 +229,35 @@ export function MessageBubble({
         )}
       </div>
     </div>
+  )
+}
+
+function UserMessageContent({
+  content,
+  onMentionClick
+}: {
+  content: string
+  onMentionClick?: (handle: string) => void
+}) {
+  const match = content.match(/^@(\w+)\s/)
+  if (!match) {
+    return <p className="whitespace-pre-wrap break-words">{content}</p>
+  }
+
+  const handle = match[1]
+  const rest = content.slice(match[0].length)
+
+  return (
+    <p className="whitespace-pre-wrap break-words">
+      <button
+        type="button"
+        onClick={() => onMentionClick?.(handle)}
+        className="inline-flex items-center gap-1 rounded-md bg-violet-500/20 text-violet-300 px-1.5 py-0.5 text-[13px] font-medium ring-1 ring-violet-500/30 hover:bg-violet-500/30 hover:ring-violet-500/50 transition-all cursor-pointer align-baseline mr-1"
+      >
+        @{handle}
+      </button>
+      {rest}
+    </p>
   )
 }
 

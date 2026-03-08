@@ -14,14 +14,14 @@ import {
   updateMessage,
   updateChatTitle,
   getSettings,
+  getAgentPresetByHandle,
   type ChatAttachment
 } from '../store'
 import type { SupervisorRouter } from '../agent/orchestrator/SupervisorRouter'
 import type { OpenRouterProviderAdapter } from '../agent/providers/openrouter/OpenRouterProviderAdapter'
 import type { NormalizedMessage } from '../agent/runtime/types'
 import type { MemoryGraphPort } from '../storage/ports/MemoryGraphPort'
-import type { FactExtractionService } from '../agent/memory/FactExtractionService'
-import type { PromptContextComposer } from '../agent/memory/PromptContextComposer'
+
 import { ChatIdleAnalyzer } from '../agent/memory/ChatIdleAnalyzer'
 import { getTelegramService } from '../telegram'
 import { withProxyRequestInit } from '../network/proxyDispatcher'
@@ -86,14 +86,13 @@ let cachedModelCapabilities: CachedModelCapabilities | null = null
 export function registerChatHandlers(
   router: SupervisorRouter,
   openRouterProvider: OpenRouterProviderAdapter,
-  memoryGraph: MemoryGraphPort,
-  factExtraction: FactExtractionService,
-  promptComposer: PromptContextComposer
+  memoryGraph: MemoryGraphPort
 ): void {
   const idleAnalyzer = new ChatIdleAnalyzer(router, (chatId, threadId) =>
     getThreadHistory(chatId, threadId).map((m) => ({
-      role: m.role as NormalizedMessage['role'],
-      content: m.content
+      role: m.role as 'user' | 'assistant' | 'system' | 'tool',
+      content: m.content,
+      timestamp: m.timestamp
     }))
   )
   ipcMain.handle('chat:list', () => {
@@ -203,13 +202,22 @@ export function registerChatHandlers(
       openRouterProvider.updateApiKey(settings.openRouterApiKey)
       openRouterProvider.updateProxyUrl(settings.proxyUrl)
 
+      let agentInstruction: string | undefined
+      const handleMatch = content.match(/^@(\w+)\s/)
+      if (handleMatch) {
+        const preset = getAgentPresetByHandle(handleMatch[1])
+        if (preset) {
+          agentInstruction = preset.prompt
+        }
+      }
+
       const mainAgent = router.getAgent('main')
       if (mainAgent && mainAgent.modelConfig.model !== settings.model) {
         mainAgent.modelConfig.model = settings.model
       }
 
       if (mainAgent) {
-        mainAgent.systemPrompt = await buildSystemPrompt(promptComposer, content)
+        mainAgent.systemPrompt = buildSystemPrompt(agentInstruction)
       }
 
       const safeAttachments = sanitizeIncomingAttachments(attachments)
@@ -251,9 +259,8 @@ export function registerChatHandlers(
       addMessage(chatId, userMessage, threadId)
       const chatAfterUserMessage = getChat(chatId)
       if (chatAfterUserMessage) {
-        void indexAndExtractFacts(
+        void indexMessage(
           memoryGraph,
-          factExtraction,
           {
             chatId,
             threadId,
@@ -265,8 +272,7 @@ export function registerChatHandlers(
             channelType: 'local_chat',
             channelExternalId: '',
             timestamp: userMessage.timestamp
-          },
-          'after_user_message'
+          }
         ).catch((error) => {
           console.error('[memory] failed to index user message:', error)
         })
@@ -323,7 +329,6 @@ export function registerChatHandlers(
         fullHistory.length,
         win,
         memoryGraph,
-        factExtraction,
         idleAnalyzer
       )
     }
@@ -345,7 +350,6 @@ function runAgent(
   messageCount: number,
   win: BrowserWindow,
   memoryGraph: MemoryGraphPort,
-  factExtraction: FactExtractionService,
   idleAnalyzer: ChatIdleAnalyzer
 ): void {
   router
@@ -363,9 +367,8 @@ function runAgent(
       const thread = chat ? getThread(chat.id, threadId) : null
       const assistantMessage = thread?.messages.find((message) => message.id === assistantMessageId)
       if (chat && assistantMessage) {
-        void indexAndExtractFacts(
+        void indexMessage(
           memoryGraph,
-          factExtraction,
           {
             chatId,
             threadId,
@@ -377,8 +380,7 @@ function runAgent(
             channelType: 'local_chat',
             channelExternalId: '',
             timestamp: assistantMessage.timestamp
-          },
-          'after_assistant_message'
+          }
         ).catch((error) => {
           console.error('[memory] failed to index assistant message:', error)
         })
@@ -524,9 +526,8 @@ function isImageAttachment(filePath: string, mimeType: string | undefined, isIma
   return Object.prototype.hasOwnProperty.call(IMAGE_MIME_BY_EXT, ext)
 }
 
-async function indexAndExtractFacts(
+async function indexMessage(
   memoryGraph: MemoryGraphPort,
-  factExtraction: FactExtractionService,
   message: {
     chatId: string
     threadId: string
@@ -538,31 +539,9 @@ async function indexAndExtractFacts(
     channelType: 'telegram' | 'local_chat' | 'email' | 'whatsapp'
     channelExternalId: string
     timestamp: number
-  },
-  reason: string
+  }
 ): Promise<void> {
   await memoryGraph.upsertMessage(message)
-  const extracted = await factExtraction.extractFromText({
-    chatId: message.chatId,
-    threadId: message.threadId,
-    role: message.role,
-    content: message.content
-  })
-  for (const fact of extracted) {
-    try {
-      await memoryGraph.upsertFact({
-        statement: fact.statement,
-        factType: fact.factType,
-        confidence: fact.confidence,
-        priority: fact.confidence,
-        recency: Date.now(),
-        entityRefs: fact.entityRefs,
-        sourceMessageIds: [{ messageId: message.messageId, chatId: message.chatId }]
-      })
-    } catch (error) {
-      console.warn(`[memory] failed to upsert extracted fact (${reason}):`, error)
-    }
-  }
 }
 
 async function modelSupportsInputModality(modelId: string, modality: string): Promise<boolean> {
@@ -573,21 +552,28 @@ async function modelSupportsInputModality(modelId: string, modality: string): Pr
 }
 
 const BASE_SYSTEM_PROMPT =
-  'You are Lamp, a helpful AI assistant. Be concise and accurate. Use web_search for real-time information, memory_query for user/fact memory retrieval, and search_messages for raw chat history lookup.'
+  'You are Lamp, a helpful AI assistant. Be concise and accurate.\n\n' +
+  'MEMORY: At the start of every conversation turn, ALWAYS call memory_query with a relevant search query to recall facts, preferences, and context about the user and topic. ' +
+  'Use the retrieved memories to personalize your response. Do not skip this step.\n\n' +
+  'TOOLS:\n' +
+  '- memory_query: search stored facts and knowledge about the user (ALWAYS use proactively)\n' +
+  '- web_search: look up real-time information from the internet\n' +
+  '- search_messages: search raw chat history for past conversations'
 
 const TELEGRAM_SYSTEM_PROMPT_ADDON =
   '\n\nYou have access to Telegram tools. You can list the user\'s chats, read messages, send messages, and search messages. ' +
   'Use these tools when the user asks about their Telegram messages or wants to communicate through Telegram. ' +
   'IMPORTANT: Always confirm with the user before sending messages on their behalf.'
 
-async function buildSystemPrompt(
-  promptComposer: PromptContextComposer,
-  userQuery: string
-): Promise<string> {
+function buildSystemPrompt(agentInstruction?: string): string {
   const telegram = getTelegramService()
-  const memoryBlock = await promptComposer.compose(userQuery, 8)
+  const currentDate = `Current date: ${new Date().toISOString()}`
   const telegramAddon = telegram.isConnected() ? TELEGRAM_SYSTEM_PROMPT_ADDON : ''
-  return [BASE_SYSTEM_PROMPT, telegramAddon, memoryBlock].filter(Boolean).join('\n\n')
+  const parts = [BASE_SYSTEM_PROMPT, currentDate, telegramAddon]
+  if (agentInstruction) {
+    parts.unshift(agentInstruction)
+  }
+  return parts.filter(Boolean).join('\n\n')
 }
 
 async function getModelCapabilitiesMap(): Promise<Map<string, string[]>> {

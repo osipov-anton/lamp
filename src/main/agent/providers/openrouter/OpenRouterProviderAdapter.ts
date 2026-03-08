@@ -52,8 +52,7 @@ export class OpenRouterProviderAdapter implements ModelProvider {
           },
           body: JSON.stringify({
             model,
-            input: [text],
-            encoding_format: 'float'
+            input: text
           })
         },
         this.config.proxyUrl
@@ -64,35 +63,23 @@ export class OpenRouterProviderAdapter implements ModelProvider {
       throw new Error(`OpenRouter embeddings error ${response.status}: ${errorBody}`)
     }
     const payload = (await response.json()) as {
-      data?: Array<{ embedding?: number[]; values?: number[] }>
-      embeddings?: number[][]
+      data?: Array<{ embedding?: number[] }>
       error?: { message?: string }
     }
-
-    const fromDataEmbedding = payload.data?.[0]?.embedding
-    if (Array.isArray(fromDataEmbedding)) return fromDataEmbedding
-
-    const fromDataValues = payload.data?.[0]?.values
-    if (Array.isArray(fromDataValues)) return fromDataValues
-
-    const fromEmbeddings = payload.embeddings?.[0]
-    if (Array.isArray(fromEmbeddings)) return fromEmbeddings
 
     if (payload.error?.message) {
       throw new Error(`OpenRouter embeddings payload error: ${payload.error.message}`)
     }
 
+    const embedding = payload.data?.[0]?.embedding
+    if (Array.isArray(embedding) && embedding.length > 0) return embedding
+
     if (!this.hasWarnedUnexpectedEmbeddingShape) {
       this.hasWarnedUnexpectedEmbeddingShape = true
-      const payloadPreview = JSON.stringify(payload).slice(0, 1200)
       console.warn(
-        '[openrouter] embeddings response missing vector, falling back to text-only retrieval.',
-        '\nmodel:',
-        model,
-        '\npayload keys:',
-        Object.keys(payload ?? {}),
-        '\npayload preview:',
-        payloadPreview
+        '[openrouter] embeddings response missing data[0].embedding, falling back to text-only retrieval.',
+        '\nmodel:', model,
+        '\npayload preview:', JSON.stringify(payload).slice(0, 1200)
       )
     }
     return []

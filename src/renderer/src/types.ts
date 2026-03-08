@@ -84,9 +84,20 @@ export interface ToolCallState {
   result?: {
     success: boolean
     content?: string
+    memoryQueryHits?: MemoryQueryHit[]
     imagePath?: string
     error?: string
   }
+}
+
+export interface MemoryQueryHit {
+  factId: string
+  statement: string
+  factType: string
+  confidence: number
+  priority: number
+  score: number
+  source?: 'related'
 }
 
 export interface RunState {
@@ -140,6 +151,15 @@ export interface AgentImageAttachmentPayload {
   mimeType: string
   filePath: string
   alt?: string
+}
+
+export interface AgentToolResultPayload {
+  chatId: string
+  threadId: string
+  runId: string
+  callId: string
+  toolId: string
+  text: string
 }
 
 export interface AgentRunStatePayload {
@@ -199,6 +219,7 @@ export interface AgentAPI {
   onStreamChunk: (cb: (data: AgentStreamChunkPayload) => void) => () => void
   onThinkingChunk: (cb: (data: AgentThinkingChunkPayload) => void) => () => void
   onToolLifecycle: (cb: (data: AgentToolLifecyclePayload) => void) => () => void
+  onToolResult: (cb: (data: AgentToolResultPayload) => void) => () => void
   onImageAttachment: (cb: (data: AgentImageAttachmentPayload) => void) => () => void
   onRunState: (cb: (data: AgentRunStatePayload) => void) => () => void
   onRunComplete: (cb: (data: AgentRunCompletePayload) => void) => () => void
@@ -238,6 +259,85 @@ export interface GoogleAPI {
   onStatusChanged: (cb: (status: GoogleConnectionStatus) => void) => () => void
 }
 
+// === Memory types ============================================================
+
+export type MemoryEntityType =
+  | 'person'
+  | 'project'
+  | 'task'
+  | 'org'
+  | 'tool'
+  | 'topic'
+  | 'channel_account'
+  | 'chat'
+
+export interface FactEntityRef {
+  entityId: string
+  entityType: MemoryEntityType
+  label: string
+  role: 'about' | 'owns' | 'prefers' | 'blocked_by' | 'works_on'
+}
+
+export interface MemoryFact {
+  factId: string
+  statement: string
+  factType: string
+  confidence: number
+  priority: number
+  recency: number
+  entityRefs: FactEntityRef[]
+  sourceMessageIds: Array<{ messageId: string; chatId: string }>
+  isArchived: boolean
+  supersededBy?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface MemoryChannelIdentity {
+  channelType: 'telegram' | 'email' | 'whatsapp' | 'local_chat'
+  externalId: string
+  displayName: string
+  confidence: number
+  status: 'confirmed' | 'pending_review'
+}
+
+export interface MemoryEntity {
+  entityId: string
+  entityType: MemoryEntityType
+  labels: string
+  aliases: string[]
+  channelIdentities: MemoryChannelIdentity[]
+  mergedInto?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface MemoryAPI {
+  listFacts: (options?: { includeArchived?: boolean }) => Promise<MemoryFact[]>
+  listEntities: () => Promise<MemoryEntity[]>
+  deleteFact: (factId: string) => Promise<boolean>
+  deleteEntity: (entityId: string) => Promise<boolean>
+}
+
+// === Agent Presets ============================================================
+
+export interface AgentPreset {
+  id: string
+  handle: string
+  name: string
+  prompt: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AgentPresetsAPI {
+  list: () => Promise<AgentPreset[]>
+  create: (data: { handle: string; name: string; prompt: string }) => Promise<AgentPreset>
+  update: (id: string, data: { handle?: string; name?: string; prompt?: string }) => Promise<AgentPreset | null>
+  delete: (id: string) => Promise<void>
+  improvePrompt: (draft: string) => Promise<string>
+}
+
 declare global {
   interface Window {
     api: {
@@ -246,6 +346,8 @@ declare global {
       settings: SettingsAPI
       telegram: TelegramAPI
       google: GoogleAPI
+      memory: MemoryAPI
+      agentPresets: AgentPresetsAPI
     }
   }
 }

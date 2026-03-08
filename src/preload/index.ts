@@ -35,6 +35,8 @@ const agentAPI = {
     ipcOn('agent:thinking-chunk', cb),
   onToolLifecycle: (cb: (data: Record<string, unknown>) => void) =>
     ipcOn('agent:tool-lifecycle', cb),
+  onToolResult: (cb: (data: Record<string, unknown>) => void) =>
+    ipcOn('agent:tool-result', cb),
   onImageAttachment: (cb: (data: Record<string, unknown>) => void) =>
     ipcOn('agent:image-attachment', cb),
   onRunState: (cb: (data: { chatId: string; threadId: string; runId: string; phase: string; iteration: number }) => void) =>
@@ -84,12 +86,42 @@ const googleAPI = {
     ipcOn('google:status-changed', cb)
 }
 
+const memoryAPI = {
+  listFacts: (options?: { includeArchived?: boolean }) =>
+    ipcRenderer.invoke('memory:list-facts', options),
+  listEntities: () => ipcRenderer.invoke('memory:list-entities'),
+  deleteFact: (factId: string) =>
+    ipcRenderer.invoke('memory:delete-fact', factId) as Promise<boolean>,
+  deleteEntity: (entityId: string) =>
+    ipcRenderer.invoke('memory:delete-entity', entityId) as Promise<boolean>,
+  reindex: () =>
+    ipcRenderer.invoke('memory:reindex') as Promise<{
+      messages: number; facts: number; entities: number
+    }>
+}
+
+const agentPresetsAPI = {
+  list: () =>
+    ipcRenderer.invoke('agent-preset:list') as Promise<
+      Array<{ id: string; handle: string; name: string; prompt: string; createdAt: number; updatedAt: number }>
+    >,
+  create: (data: { handle: string; name: string; prompt: string }) =>
+    ipcRenderer.invoke('agent-preset:create', data),
+  update: (id: string, data: { handle?: string; name?: string; prompt?: string }) =>
+    ipcRenderer.invoke('agent-preset:update', id, data),
+  delete: (id: string) => ipcRenderer.invoke('agent-preset:delete', id),
+  improvePrompt: (draft: string) =>
+    ipcRenderer.invoke('agent-preset:improve-prompt', draft) as Promise<string>
+}
+
 const api = {
   chat: chatAPI,
   agent: agentAPI,
   settings: settingsAPI,
   telegram: telegramAPI,
-  google: googleAPI
+  google: googleAPI,
+  memory: memoryAPI,
+  agentPresets: agentPresetsAPI
 }
 
 if (process.contextIsolated) {

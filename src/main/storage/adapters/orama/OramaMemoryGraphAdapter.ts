@@ -1,9 +1,9 @@
 import { app } from 'electron'
-import { mkdir, readFile, writeFile } from 'fs/promises'
+import { copyFile, mkdir, readFile, rename, writeFile } from 'fs/promises'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { createHash } from 'crypto'
-import { create, insert, load, remove, save, search, upsert } from '@orama/orama'
+import { create, insert, load, remove, save, search, searchVector, upsert } from '@orama/orama'
 import type {
   EntityNode,
   FactNode,
@@ -58,6 +58,7 @@ export class OramaMemoryGraphAdapter implements MemoryGraphPort {
   private entitiesDbPromise = this.createEntityDb()
   private factsDbPromise = this.createFactDb()
   private readyPromise: Promise<void>
+  private readonly persistChains = new Map<string, Promise<void>>()
 
   private readonly dataDir: string
   private readonly messageDbPath: string
@@ -106,30 +107,30 @@ export class OramaMemoryGraphAdapter implements MemoryGraphPort {
     if (options?.chatId) where.chatId = options.chatId
     if (options?.role) where.role = options.role
 
+    const limit = options?.limit ?? 5
     const embedding = await this.safeEmbedding(term)
-    const result = embedding
-      ? await search(db, {
-          mode: 'hybrid',
-          term,
-          vector: {
-            value: embedding,
-            property: 'contentEmbedding'
-          },
-          limit: options?.limit ?? 5,
-          properties: ['content', 'chatTitle', 'senderName'],
-          where
-        })
-      : await search(db, {
-          term,
-          limit: options?.limit ?? 5,
-          properties: ['content', 'chatTitle', 'senderName'],
-          where
-        })
+    const [textResult, vectorResult] = await Promise.all([
+      search(db, {
+        term,
+        limit: Math.max(limit * 2, 10),
+        properties: ['content', 'chatTitle', 'senderName'],
+        where
+      }),
+      embedding
+        ? searchVector(db, {
+            mode: 'vector',
+            vector: {
+              value: embedding,
+              property: 'contentEmbedding'
+            },
+            similarity: 0,
+            limit: Math.max(limit * 2, 10),
+            where
+          })
+        : Promise.resolve(null)
+    ])
 
-    return result.hits.map((hit) => ({
-      score: Number(hit.score),
-      message: this.fromMessageDoc(hit.document as MessageDoc)
-    }))
+    return this.mergeMessageHits(textResult.hits, vectorResult?.hits ?? [], limit)
   }
 
   async getMessageById(messageId: string): Promise<MessageMemoryDocument | null> {
@@ -179,28 +180,30 @@ export class OramaMemoryGraphAdapter implements MemoryGraphPort {
     if (!options.includeArchived) where.isArchived = false
     if (options.factType) where.factType = options.factType
 
+    const limit = options.limit ?? 10
     const embedding = await this.safeEmbedding(query)
-    const result = embedding
-      ? await search(db, {
-          mode: 'hybrid',
-          term: query,
-          vector: {
-            value: embedding,
-            property: 'statementEmbedding'
-          },
-          properties: ['statement'],
-          where,
-          limit: options.limit ?? 10
-        })
-      : await search(db, {
-          term: query,
-          properties: ['statement'],
-          where,
-          limit: options.limit ?? 10
-        })
+    const [textResult, vectorResult] = await Promise.all([
+      search(db, {
+        term: query,
+        properties: ['statement'],
+        where,
+        limit: Math.max(limit * 2, 10)
+      }),
+      embedding
+        ? searchVector(db, {
+            mode: 'vector',
+            vector: {
+              value: embedding,
+              property: 'statementEmbedding'
+            },
+            similarity: 0,
+            where,
+            limit: Math.max(limit * 2, 10)
+          })
+        : Promise.resolve(null)
+    ])
 
-    return result.hits
-      .map((hit) => ({ score: Number(hit.score), fact: this.fromFactDoc(hit.document as FactDoc) }))
+    return this.mergeFactHits(textResult.hits, vectorResult?.hits ?? [], limit)
       .filter((hit) => {
         if (!options.entityType) return true
         return hit.fact.entityRefs.some((entity) => entity.entityType === options.entityType)
@@ -298,11 +301,13 @@ export class OramaMemoryGraphAdapter implements MemoryGraphPort {
     if (merge.labels.trim()) keepAliases.add(merge.labels.trim())
     keep.aliases = Array.from(keepAliases).join(' ')
     keep.updatedAt = Date.now()
-    keep.labelEmbedding = (await this.safeEmbedding([keep.labels, keep.aliases].join(' '))) ?? keep.labelEmbedding
+    keep.labelEmbedding =
+      (await this.safeEmbedding([keep.labels, keep.aliases].join(' '))) ?? this.normalizeVector(keep.labelEmbedding)
     await upsert(entitiesDb, keep)
 
     merge.mergedInto = keepEntityId
     merge.updatedAt = Date.now()
+    merge.labelEmbedding = this.normalizeVector(merge.labelEmbedding)
     await upsert(entitiesDb, merge)
 
     const allFacts = await search(factsDb, { term: '', limit: 10_000 })
@@ -356,6 +361,116 @@ export class OramaMemoryGraphAdapter implements MemoryGraphPort {
     return this.fromEntityDoc(entity)
   }
 
+  async listAllFacts(options?: { includeArchived?: boolean }): Promise<FactNode[]> {
+    await this.ready()
+    const db = await this.factsDbPromise
+    const where: Record<string, unknown> = {}
+    if (!options?.includeArchived) where.isArchived = false
+    const result = await search(db, { term: '', where, limit: 10_000 })
+    return result.hits.map((hit) => this.fromFactDoc(hit.document as FactDoc))
+  }
+
+  async listAllEntities(): Promise<EntityNode[]> {
+    await this.ready()
+    const db = await this.entitiesDbPromise
+    const result = await search(db, { term: '', limit: 10_000 })
+    return result.hits.map((hit) => this.fromEntityDoc(hit.document as EntityDoc))
+  }
+
+  async deleteFact(factId: string): Promise<boolean> {
+    await this.ready()
+    const db = await this.factsDbPromise
+    const result = await search(db, { term: '', where: { factId }, limit: 1 })
+    const hit = result.hits[0]
+    if (!hit) return false
+    await remove(db, hit.id as string)
+    await this.persistFacts()
+    return true
+  }
+
+  async deleteEntity(entityId: string): Promise<boolean> {
+    await this.ready()
+    const entitiesDb = await this.entitiesDbPromise
+    const factsDb = await this.factsDbPromise
+    const result = await search(entitiesDb, { term: '', where: { entityId }, limit: 1 })
+    const hit = result.hits[0]
+    if (!hit) return false
+
+    await remove(entitiesDb, hit.id as string)
+
+    let factsTouched = 0
+    const allFacts = await search(factsDb, { term: '', limit: 10_000 })
+    for (const factHit of allFacts.hits) {
+      const doc = factHit.document as FactDoc
+      const refs = this.parseJson<Array<{ entityId: string }>>(doc.entityRefs, [])
+      const updatedRefs = refs.filter((ref) => ref.entityId !== entityId)
+      if (updatedRefs.length === refs.length) continue
+      doc.entityRefs = JSON.stringify(updatedRefs)
+      doc.updatedAt = Date.now()
+      await upsert(factsDb, doc)
+      factsTouched++
+    }
+
+    await this.persistEntities()
+    if (factsTouched > 0) {
+      await this.persistFacts()
+    }
+
+    return true
+  }
+
+  async getFactsByEntityIds(
+    entityIds: string[],
+    options?: { includeArchived?: boolean }
+  ): Promise<FactNode[]> {
+    await this.ready()
+    if (entityIds.length === 0) return []
+    const db = await this.factsDbPromise
+    const where: Record<string, unknown> = {}
+    if (!options?.includeArchived) where.isArchived = false
+    const result = await search(db, { term: '', where, limit: 10_000 })
+    const idSet = new Set(entityIds)
+    return result.hits
+      .map((hit) => this.fromFactDoc(hit.document as FactDoc))
+      .filter((fact) => fact.entityRefs.some((ref) => idSet.has(ref.entityId)))
+  }
+
+  async reindexEmbeddings(): Promise<{ facts: number; entities: number }> {
+    await this.ready()
+    let factsCount = 0
+    let entitiesCount = 0
+
+    const factsDb = await this.factsDbPromise
+    const allFacts = await search(factsDb, { term: '', limit: 10_000 })
+    for (const hit of allFacts.hits) {
+      const doc = hit.document as FactDoc
+      const embedding = await this.safeEmbedding(doc.statement)
+      if (embedding) {
+        doc.statementEmbedding = embedding
+        await upsert(factsDb, doc)
+        factsCount++
+      }
+    }
+    if (factsCount > 0) await this.persistFacts()
+
+    const entitiesDb = await this.entitiesDbPromise
+    const allEntities = await search(entitiesDb, { term: '', limit: 10_000 })
+    for (const hit of allEntities.hits) {
+      const doc = hit.document as EntityDoc
+      const text = [doc.labels, doc.aliases].filter(Boolean).join(' ')
+      const embedding = await this.safeEmbedding(text)
+      if (embedding) {
+        doc.labelEmbedding = embedding
+        await upsert(entitiesDb, doc)
+        entitiesCount++
+      }
+    }
+    if (entitiesCount > 0) await this.persistEntities()
+
+    console.log(`[memory] reindex complete: ${factsCount} facts, ${entitiesCount} entities`)
+    return { facts: factsCount, entities: entitiesCount }
+  }
+
   async getTopFactsForPrompt(query: string, limit: number): Promise<FactNode[]> {
     const hits = await this.queryFacts({
       query: query.trim() || 'latest user context',
@@ -373,11 +488,24 @@ export class OramaMemoryGraphAdapter implements MemoryGraphPort {
     const label = input.label.trim()
     const existing = await search(db, {
       term: label,
-      where: { entityType: input.entityType, mergedInto: '' },
+      where: { entityType: input.entityType },
       limit: 1
     })
     const hit = existing.hits[0]
     if (hit) return this.fromEntityDoc(hit.document as EntityDoc)
+
+    const embedding = await this.safeEmbedding(label)
+    if (embedding) {
+      const similar = await searchVector(db, {
+        mode: 'vector',
+        vector: { value: embedding, property: 'labelEmbedding' },
+        where: { entityType: input.entityType },
+        similarity: 0.85,
+        limit: 1
+      })
+      const similarHit = similar.hits[0]
+      if (similarHit) return this.fromEntityDoc(similarHit.document as EntityDoc)
+    }
 
     const now = Date.now()
     const doc: EntityDoc = {
@@ -387,7 +515,7 @@ export class OramaMemoryGraphAdapter implements MemoryGraphPort {
       aliases: '',
       channelIdentities: '[]',
       mergedInto: '',
-      labelEmbedding: (await this.safeEmbedding(label)) ?? this.emptyVector(),
+      labelEmbedding: embedding ?? this.emptyVector(),
       createdAt: now,
       updatedAt: now
     }
@@ -429,13 +557,13 @@ export class OramaMemoryGraphAdapter implements MemoryGraphPort {
     ])
   }
 
-  private async loadDb(dbPromise: Promise<unknown>, filePath: string): Promise<void> {
+  private async loadDb(dbPromise: any, filePath: string): Promise<void> {
     if (!existsSync(filePath)) return
     try {
       const content = await readFile(filePath, 'utf8')
       if (!content.trim()) return
-      const raw = JSON.parse(content)
-      load(await dbPromise, raw)
+      const raw = await this.parsePersistedDb(filePath, content)
+      await load(await dbPromise, raw as any)
     } catch (error) {
       console.warn('[memory] failed to load persisted Orama DB:', filePath, error)
     }
@@ -453,9 +581,18 @@ export class OramaMemoryGraphAdapter implements MemoryGraphPort {
     await this.persistDb(this.factsDbPromise, this.factDbPath)
   }
 
-  private async persistDb(dbPromise: Promise<unknown>, filePath: string): Promise<void> {
-    const serialized = save(await dbPromise)
-    await writeFile(filePath, JSON.stringify(serialized), 'utf8')
+  private async persistDb(dbPromise: any, filePath: string): Promise<void> {
+    const previous = this.persistChains.get(filePath) ?? Promise.resolve()
+    const next = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const serialized = save(await dbPromise)
+        const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
+        await writeFile(tempPath, JSON.stringify(serialized), 'utf8')
+        await rename(tempPath, filePath)
+      })
+    this.persistChains.set(filePath, next)
+    await next
   }
 
   private async toMessageDoc(message: MessageMemoryDocument): Promise<MessageDoc> {
@@ -548,6 +685,173 @@ export class OramaMemoryGraphAdapter implements MemoryGraphPort {
 
   private emptyVector(): number[] {
     return Array.from({ length: EMBEDDING_DIM }, () => 0)
+  }
+
+  private normalizeVector(value: unknown): number[] {
+    if (!Array.isArray(value) || value.length === 0) {
+      return this.emptyVector()
+    }
+    if (value.length === EMBEDDING_DIM) {
+      return value.map((entry) => Number(entry) || 0)
+    }
+    if (value.length > EMBEDDING_DIM) {
+      return value.slice(0, EMBEDDING_DIM).map((entry) => Number(entry) || 0)
+    }
+    return value
+      .map((entry) => Number(entry) || 0)
+      .concat(Array.from({ length: EMBEDDING_DIM - value.length }, () => 0))
+  }
+
+  private async parsePersistedDb(filePath: string, content: string): Promise<unknown> {
+    try {
+      return JSON.parse(content)
+    } catch (error) {
+      const recovered = this.extractFirstJsonValue(content)
+      if (!recovered) throw error
+
+      const backupPath = `${filePath}.corrupt-${Date.now()}`
+      await copyFile(filePath, backupPath)
+      await writeFile(filePath, recovered.json, 'utf8')
+      console.warn('[memory] recovered corrupted Orama DB:', filePath, 'backup:', backupPath)
+      return recovered.value
+    }
+  }
+
+  private extractFirstJsonValue(content: string): { json: string; value: unknown } | null {
+    const trimmed = content.trimStart()
+    if (!trimmed) return null
+
+    const startOffset = content.length - trimmed.length
+    const opener = trimmed[0]
+    const closer = opener === '{' ? '}' : opener === '[' ? ']' : null
+    if (!closer) return null
+
+    let depth = 0
+    let inString = false
+    let isEscaped = false
+
+    for (let i = 0; i < trimmed.length; i++) {
+      const char = trimmed[i]
+
+      if (inString) {
+        if (isEscaped) {
+          isEscaped = false
+        } else if (char === '\\') {
+          isEscaped = true
+        } else if (char === '"') {
+          inString = false
+        }
+        continue
+      }
+
+      if (char === '"') {
+        inString = true
+        continue
+      }
+
+      if (char === opener) {
+        depth += 1
+        continue
+      }
+
+      if (char === closer) {
+        depth -= 1
+        if (depth === 0) {
+          const endOffset = startOffset + i + 1
+          const candidate = content.slice(startOffset, endOffset)
+          try {
+            return {
+              json: candidate,
+              value: JSON.parse(candidate)
+            }
+          } catch {
+            return null
+          }
+        }
+      }
+    }
+
+    return null
+  }
+
+  private mergeMessageHits(
+    textHits: Array<{ score: number; document: unknown }>,
+    vectorHits: Array<{ score: number; document: unknown }>,
+    limit: number
+  ): MessageSearchHit[] {
+    const merged = new Map<string, MessageSearchHit & { sources: number }>()
+
+    for (const hit of textHits) {
+      const message = this.fromMessageDoc(hit.document as MessageDoc)
+      merged.set(message.messageId, {
+        score: Number(hit.score),
+        message,
+        sources: 1
+      })
+    }
+
+    for (const hit of vectorHits) {
+      const message = this.fromMessageDoc(hit.document as MessageDoc)
+      const existing = merged.get(message.messageId)
+      if (existing) {
+        existing.score = Math.max(existing.score, Number(hit.score))
+        existing.sources += 1
+      } else {
+        merged.set(message.messageId, {
+          score: Number(hit.score),
+          message,
+          sources: 1
+        })
+      }
+    }
+
+    return [...merged.values()]
+      .map(({ sources, ...hit }) => ({
+        ...hit,
+        score: hit.score + (sources > 1 ? 0.15 : 0)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+  }
+
+  private mergeFactHits(
+    textHits: Array<{ score: number; document: unknown }>,
+    vectorHits: Array<{ score: number; document: unknown }>,
+    limit: number
+  ): FactSearchHit[] {
+    const merged = new Map<string, FactSearchHit & { sources: number }>()
+
+    for (const hit of textHits) {
+      const fact = this.fromFactDoc(hit.document as FactDoc)
+      merged.set(fact.factId, {
+        score: Number(hit.score),
+        fact,
+        sources: 1
+      })
+    }
+
+    for (const hit of vectorHits) {
+      const fact = this.fromFactDoc(hit.document as FactDoc)
+      const existing = merged.get(fact.factId)
+      if (existing) {
+        existing.score = Math.max(existing.score, Number(hit.score))
+        existing.sources += 1
+      } else {
+        merged.set(fact.factId, {
+          score: Number(hit.score),
+          fact,
+          sources: 1
+        })
+      }
+    }
+
+    return [...merged.values()]
+      .map(({ sources, ...hit }) => ({
+        ...hit,
+        score: hit.score + (sources > 1 ? 0.15 : 0)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
   }
 
   private createMessageDb() {

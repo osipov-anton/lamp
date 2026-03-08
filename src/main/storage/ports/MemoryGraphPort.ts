@@ -115,4 +115,10 @@ export interface MemoryGraphPort {
     confidence: number
   }): Promise<EntityNode>
   getTopFactsForPrompt(query: string, limit: number): Promise<FactNode[]>
+  listAllFacts(options?: { includeArchived?: boolean }): Promise<FactNode[]>
+  listAllEntities(): Promise<EntityNode[]>
+  deleteFact(factId: string): Promise<boolean>
+  deleteEntity(entityId: string): Promise<boolean>
+  reindexEmbeddings(): Promise<{ facts: number; entities: number }>
+  getFactsByEntityIds(entityIds: string[], options?: { includeArchived?: boolean }): Promise<FactNode[]>
 }

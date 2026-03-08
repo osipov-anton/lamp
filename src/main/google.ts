@@ -27,6 +27,10 @@ export interface GoogleUserInfo {
   picture?: string
 }
 
+function stripMimeHeaderLineBreaks(value: string): string {
+  return value.replace(/[\r\n]+/g, '')
+}
+
 export class GoogleService {
   private oauth2Client: OAuth2Client
   private callbackServer: Server | null = null
@@ -375,10 +379,12 @@ export class GoogleService {
   ): Promise<{ messageId: string }> {
     await this.ensureValidToken()
     const gmail = this.getGmail()
+    const safeTo = stripMimeHeaderLineBreaks(to)
+    const safeSubject = stripMimeHeaderLineBreaks(subject)
 
     const rawMessage = [
-      `To: ${to}`,
-      `Subject: ${subject}`,
+      `To: ${safeTo}`,
+      `Subject: ${safeSubject}`,
       'Content-Type: text/plain; charset=utf-8',
       '',
       body

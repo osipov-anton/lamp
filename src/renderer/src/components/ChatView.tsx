@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type KeyboardEvent } from 'react'
+import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
 import {
   AlertCircle,
   Terminal,
@@ -22,7 +22,9 @@ import { MessageBubble } from './MessageBubble'
 import { Kbd } from './CommandPalette'
 import lampIcon from '../assets/lamp.png'
 import { cn } from '@renderer/lib/utils'
+import { Bot } from 'lucide-react'
 import type {
+  AgentPreset,
   AppSettings,
   Chat,
   ChatThread,
@@ -93,6 +95,9 @@ export function ChatView({
   const [modelSearch, setModelSearch] = useState('')
   const [savingModel, setSavingModel] = useState(false)
   const [selectedAttachments, setSelectedAttachments] = useState<MessageAttachment[]>([])
+  const [agentPresets, setAgentPresets] = useState<AgentPreset[]>([])
+  const [mentionOpen, setMentionOpen] = useState(false)
+  const [mentionIndex, setMentionIndex] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
@@ -123,6 +128,7 @@ export function ChatView({
       .then(setModels)
       .catch(() => setModels([]))
       .finally(() => setModelsLoading(false))
+    window.api.agentPresets.list().then(setAgentPresets).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -145,6 +151,33 @@ export function ChatView({
         const q = modelSearch.toLowerCase()
         return m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
       })
+
+  const mentionQuery = (() => {
+    const match = input.match(/^@(\w*)$/)
+    return match ? match[1] : null
+  })()
+
+  const filteredPresets = mentionQuery !== null
+    ? agentPresets.filter((p) =>
+        p.handle.toLowerCase().startsWith(mentionQuery.toLowerCase()) ||
+        p.name.toLowerCase().startsWith(mentionQuery.toLowerCase())
+      )
+    : []
+
+  useEffect(() => {
+    if (mentionQuery !== null && filteredPresets.length > 0) {
+      setMentionOpen(true)
+      setMentionIndex(0)
+    } else {
+      setMentionOpen(false)
+    }
+  }, [mentionQuery, filteredPresets.length])
+
+  const selectPreset = useCallback((preset: AgentPreset) => {
+    setInput(`@${preset.handle} `)
+    setMentionOpen(false)
+    textareaRef.current?.focus()
+  }, [])
 
   const handleSend = () => {
     const trimmed = input.trim()
@@ -179,6 +212,28 @@ export function ChatView({
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionOpen && filteredPresets.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionIndex((i) => (i + 1) % filteredPresets.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionIndex((i) => (i - 1 + filteredPresets.length) % filteredPresets.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        selectPreset(filteredPresets[mentionIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMentionOpen(false)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -196,6 +251,11 @@ export function ChatView({
     setInput(prompt)
     textareaRef.current?.focus()
   }
+
+  const handleMentionClick = useCallback((handle: string) => {
+    setInput(`@${handle} `)
+    textareaRef.current?.focus()
+  }, [])
 
   if (!chat || !mainThread) {
     return (
@@ -382,6 +442,7 @@ export function ChatView({
                     showAvatar={showAvatar}
                     linkedThreads={messageThreads}
                     onOpenThread={onOpenThread}
+                    onMentionClick={handleMentionClick}
                     onStartThread={
                       msg.role === 'assistant'
                         ? (messageId, selectedText) =>
@@ -481,6 +542,45 @@ export function ChatView({
               </div>
             )}
 
+            {mentionOpen && filteredPresets.length > 0 && (
+              <div className="absolute bottom-full mb-2 left-0 right-0 z-50">
+                <div className="rounded-xl border border-white/[0.08] bg-[#0A0A0A] shadow-xl shadow-black/40 overflow-hidden backdrop-blur-xl">
+                  <div className="px-3 py-2 border-b border-white/[0.05]">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                      Agents
+                    </span>
+                  </div>
+                  <div className="py-1 max-h-[200px] overflow-y-auto">
+                    {filteredPresets.map((preset, idx) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className={cn(
+                          'w-full flex items-center gap-3 px-3 py-2 text-left transition-colors',
+                          idx === mentionIndex
+                            ? 'bg-white/[0.06] text-foreground'
+                            : 'text-muted-foreground hover:bg-white/[0.04] hover:text-foreground'
+                        )}
+                        onMouseEnter={() => setMentionIndex(idx)}
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          selectPreset(preset)
+                        }}
+                      >
+                        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-400 ring-1 ring-violet-500/20">
+                          <Bot className="size-3.5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium truncate">{preset.name}</div>
+                          <div className="text-[11px] text-muted-foreground/50 font-mono">@{preset.handle}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="relative flex items-end bg-[#0A0A0A] rounded-[28px] border border-white/[0.08] shadow-lg shadow-black/20 focus-within:border-white/[0.15] focus-within:shadow-[0_0_20px_rgba(255,255,255,0.03)] focus-within:bg-[#0E0E0E] transition-all duration-500 group no-drag">
               <div className="pl-3 pb-2.5 pt-2.5 shrink-0">
                 <Button
@@ -571,6 +671,7 @@ export function ChatView({
                     isStreaming={msgIsStreaming}
                     toolCalls={msgIsStreaming ? sideToolCalls : msg.toolCalls}
                     showAvatar={showAvatar}
+                    onMentionClick={handleMentionClick}
                   />
                 )
               })}

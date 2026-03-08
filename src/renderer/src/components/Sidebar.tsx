@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Trash2, Settings, MessageSquare, Blocks, Search } from 'lucide-react'
+import { Trash2, Settings, MessageSquare, Blocks, Search, Brain, Bot } from 'lucide-react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { ScrollArea } from './ui/scroll-area'
@@ -44,12 +44,14 @@ function groupChatsByDate(chats: Chat[]): ChatGroup[] {
 interface SidebarProps {
   chats: Chat[]
   activeChatId: string | null
-  currentView?: 'chat' | 'integrations'
+  currentView?: 'chat' | 'integrations' | 'memory' | 'agents'
   onSelectChat: (id: string) => void
   onNewChat: () => void
   onDeleteChat: (id: string) => void
   onOpenSettings: () => void
   onOpenIntegrations: () => void
+  onOpenMemory: () => void
+  onOpenAgents: () => void
 }
 
 export function Sidebar({
@@ -60,7 +62,9 @@ export function Sidebar({
   onNewChat,
   onDeleteChat,
   onOpenSettings,
-  onOpenIntegrations
+  onOpenIntegrations,
+  onOpenMemory,
+  onOpenAgents
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const chatItemRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
@@ -226,6 +230,38 @@ export function Sidebar({
       </ScrollArea>
 
       <div className="p-3 mt-auto space-y-0.5 shrink-0 border-t border-sidebar-border/50">
+        <Button
+          variant="ghost"
+          className={cn(
+            "w-full justify-start gap-2.5 h-9 px-3 transition-all duration-200 rounded-lg no-drag font-medium text-[13px]",
+            currentView === 'memory'
+              ? "bg-sidebar-accent text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/60"
+          )}
+          onClick={onOpenMemory}
+        >
+          <Brain className="size-4" />
+          <span className="flex-1 text-left">Memory</span>
+          <span className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Kbd>⌘</Kbd><Kbd>M</Kbd>
+          </span>
+        </Button>
+        <Button
+          variant="ghost"
+          className={cn(
+            "w-full justify-start gap-2.5 h-9 px-3 transition-all duration-200 rounded-lg no-drag font-medium text-[13px]",
+            currentView === 'agents'
+              ? "bg-sidebar-accent text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/60"
+          )}
+          onClick={onOpenAgents}
+        >
+          <Bot className="size-4" />
+          <span className="flex-1 text-left">Agents</span>
+          <span className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Kbd>⌘</Kbd><Kbd>G</Kbd>
+          </span>
+        </Button>
         <Button
           variant="ghost"
           className={cn(

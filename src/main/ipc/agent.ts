@@ -84,7 +84,16 @@ export function bridgeAgentEventsToIPC(bus: ArtifactBus, callbacks: AgentBridgeC
         break
 
       case 'artifact':
-        if (event.artifact.content.type === 'tool_output_image') {
+        if (event.artifact.content.type === 'tool_output_text') {
+          win.webContents.send('agent:tool-result', {
+            chatId,
+            threadId,
+            runId: event.artifact.runId,
+            callId: event.artifact.content.callId,
+            toolId: event.artifact.content.toolId,
+            text: event.artifact.content.text
+          })
+        } else if (event.artifact.content.type === 'tool_output_image') {
           win.webContents.send('agent:image-attachment', {
             chatId,
             threadId,

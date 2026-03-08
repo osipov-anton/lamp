@@ -4,6 +4,8 @@ import { Sidebar } from './components/Sidebar'
 import { ChatView } from './components/ChatView'
 import { SettingsDialog } from './components/SettingsDialog'
 import { IntegrationsView } from './components/IntegrationsView'
+import { MemoryView } from './components/MemoryView'
+import { AgentsView } from './components/AgentsView'
 import { TelegramAuthDialog } from './components/TelegramAuthDialog'
 import { GoogleAuthDialog } from './components/GoogleAuthDialog'
 import { CommandPalette } from './components/CommandPalette'
@@ -44,7 +46,7 @@ function App(): JSX.Element {
   const [googleAuthOpen, setGoogleAuthOpen] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   
-  const [currentView, setCurrentView] = useState<'chat' | 'integrations'>('chat')
+  const [currentView, setCurrentView] = useState<'chat' | 'integrations' | 'memory' | 'agents'>('chat')
 
   const handleSelectChat = useCallback((id: string) => {
     setActiveChatId(id)
@@ -58,6 +60,8 @@ function App(): JSX.Element {
 
   const handleOpenSettings = useCallback(() => setSettingsOpen(true), [])
   const handleOpenIntegrations = useCallback(() => setCurrentView('integrations'), [])
+  const handleOpenMemory = useCallback(() => setCurrentView('memory'), [])
+  const handleOpenAgents = useCallback(() => setCurrentView('agents'), [])
 
   const hotkeys = useMemo<Hotkey[]>(
     () => [
@@ -85,6 +89,18 @@ function App(): JSX.Element {
         when: () => !commandPaletteOpen
       },
       {
+        key: 'm',
+        meta: true,
+        action: handleOpenMemory,
+        when: () => !commandPaletteOpen
+      },
+      {
+        key: 'g',
+        meta: true,
+        action: handleOpenAgents,
+        when: () => !commandPaletteOpen
+      },
+      {
         key: 'Backspace',
         meta: true,
         action: () => {
@@ -104,6 +120,8 @@ function App(): JSX.Element {
       handleNewChat,
       handleOpenSettings,
       handleOpenIntegrations,
+      handleOpenMemory,
+      handleOpenAgents,
       activeChatId,
       deleteChat,
       stopStreaming,
@@ -125,6 +143,8 @@ function App(): JSX.Element {
           onDeleteChat={deleteChat}
           onOpenSettings={handleOpenSettings}
           onOpenIntegrations={handleOpenIntegrations}
+          onOpenMemory={handleOpenMemory}
+          onOpenAgents={handleOpenAgents}
         />
         {currentView === 'chat' ? (
           <ChatView
@@ -148,6 +168,10 @@ function App(): JSX.Element {
             onDismissError={dismissError}
             onNewChat={handleNewChat}
           />
+        ) : currentView === 'memory' ? (
+          <MemoryView />
+        ) : currentView === 'agents' ? (
+          <AgentsView />
         ) : (
           <IntegrationsView
             onOpenTelegramAuth={() => setTelegramAuthOpen(true)}

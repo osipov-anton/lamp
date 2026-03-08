@@ -96,6 +96,34 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
           {toolCall.result?.error && (
             <p className="text-xs text-destructive">{toolCall.result.error}</p>
           )}
+
+          {toolCall.toolId === 'memory_query' && toolCall.result?.memoryQueryHits && toolCall.result.memoryQueryHits.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-foreground/80">
+                Returned facts: {toolCall.result.memoryQueryHits.length}
+              </div>
+              <div className="space-y-1.5">
+                {toolCall.result.memoryQueryHits.map((hit) => (
+                  <div key={hit.factId} className="rounded-md bg-background/50 p-2 text-xs">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <span>{hit.factType || 'fact'}</span>
+                      <span>score={hit.score.toFixed(3)}</span>
+                      {hit.source === 'related' && <span>related</span>}
+                    </div>
+                    <div className="mt-1 whitespace-pre-wrap break-words text-foreground/90">
+                      {hit.statement}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {toolCall.result?.content && toolCall.toolId !== 'memory_query' && (
+            <pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words bg-background/50 rounded p-2 max-h-56 overflow-y-auto">
+              {toolCall.result.content}
+            </pre>
+          )}
         </div>
       )}
 

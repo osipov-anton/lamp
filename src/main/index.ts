@@ -11,6 +11,8 @@ import { registerChatHandlers } from './ipc/chat'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerTelegramHandlers } from './ipc/telegram'
 import { registerGoogleHandlers } from './ipc/google'
+import { registerMemoryHandlers } from './ipc/memory'
+import { registerAgentPresetHandlers } from './ipc/agentPresets'
 import { bootstrapAgentSystem } from './agent/bootstrap'
 import { bridgeAgentEventsToIPC } from './ipc/agent'
 import { getTelegramService } from './telegram'
@@ -131,14 +133,16 @@ app.whenReady().then(() => {
   }
 
   try {
-    const { bus, router, openRouterProvider, memoryGraph, factExtraction, promptComposer } = bootstrapAgentSystem()
+    const { bus, router, openRouterProvider, memoryGraph } = bootstrapAgentSystem()
 
     bridgeAgentEventsToIPC(bus, {
       getRunContext: (runId) => router.getRunContextForRun(runId)
     })
 
-    registerChatHandlers(router, openRouterProvider, memoryGraph, factExtraction, promptComposer)
+    registerChatHandlers(router, openRouterProvider, memoryGraph)
     registerSettingsHandlers()
+    registerMemoryHandlers(memoryGraph)
+    registerAgentPresetHandlers()
 
     const telegramService = getTelegramService()
     registerTelegramHandlers(telegramService)

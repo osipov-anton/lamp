@@ -9,6 +9,8 @@ interface GoogleAuthDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+type GoogleAuthOperation = 'connecting' | 'disconnecting' | null
+
 function GoogleLogo({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none">
@@ -23,12 +25,13 @@ function GoogleLogo({ className }: { className?: string }) {
 export function GoogleAuthDialog({ open, onOpenChange }: GoogleAuthDialogProps) {
   const [status, setStatus] = useState<GoogleConnectionStatus>('disconnected')
   const [userInfo, setUserInfo] = useState<GoogleUserInfo | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [operation, setOperation] = useState<GoogleAuthOperation>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
     setError(null)
+    setOperation(null)
 
     Promise.all([
       window.api.google.getStatus(),
@@ -36,6 +39,9 @@ export function GoogleAuthDialog({ open, onOpenChange }: GoogleAuthDialogProps) 
     ]).then(([s, info]) => {
       setStatus(s)
       setUserInfo(info)
+      if (s !== 'connecting') {
+        setOperation(null)
+      }
     })
   }, [open])
 
@@ -43,9 +49,11 @@ export function GoogleAuthDialog({ open, onOpenChange }: GoogleAuthDialogProps) 
     const unsub = window.api.google.onStatusChanged((s) => {
       setStatus(s)
       if (s === 'connected') {
+        setOperation(null)
         window.api.google.getUserInfo().then(setUserInfo)
       }
       if (s === 'disconnected') {
+        setOperation(null)
         setUserInfo(null)
       }
     })
@@ -53,31 +61,30 @@ export function GoogleAuthDialog({ open, onOpenChange }: GoogleAuthDialogProps) 
   }, [])
 
   const handleConnect = async () => {
-    setLoading(true)
+    setOperation('connecting')
     setError(null)
     try {
       await window.api.google.startAuth()
     } catch (err) {
+      setOperation(null)
       setError(err instanceof Error ? err.message : 'Failed to connect')
-    } finally {
-      setLoading(false)
     }
   }
 
   const handleDisconnect = async () => {
-    setLoading(true)
+    setOperation('disconnecting')
     setError(null)
     try {
       await window.api.google.disconnect()
     } catch (err) {
+      setOperation(null)
       setError(err instanceof Error ? err.message : 'Failed to disconnect')
-    } finally {
-      setLoading(false)
     }
   }
 
   const isConnected = status === 'connected'
-  const isConnecting = status === 'connecting' || loading
+  const isConnecting = status === 'connecting' || operation === 'connecting'
+  const isDisconnecting = operation === 'disconnecting'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -132,7 +139,9 @@ export function GoogleAuthDialog({ open, onOpenChange }: GoogleAuthDialogProps) 
 
           {/* Title */}
           <h2 className="text-[22px] font-semibold tracking-tight mb-2 text-center">
-            {isConnected
+            {isDisconnecting
+              ? 'Disconnecting...'
+              : isConnected
               ? userInfo?.name || 'Connected'
               : isConnecting
                 ? 'Connecting...'
@@ -141,7 +150,9 @@ export function GoogleAuthDialog({ open, onOpenChange }: GoogleAuthDialogProps) 
 
           {/* Subtitle */}
           <p className="text-[#aaaaaa] text-[14px] text-center mb-8 max-w-[300px] leading-relaxed">
-            {isConnected && userInfo
+            {isDisconnecting
+              ? 'Revoking access and disconnecting your Google account.'
+              : isConnected && userInfo
               ? userInfo.email
               : isConnecting
                 ? 'Complete the sign-in in your browser, then return here.'
@@ -206,7 +217,7 @@ export function GoogleAuthDialog({ open, onOpenChange }: GoogleAuthDialogProps) 
             {!isConnected && !isConnecting && (
               <Button
                 onClick={handleConnect}
-                disabled={loading}
+                disabled={isConnecting || isDisconnecting}
                 className="w-full h-[52px] bg-white hover:bg-white/95 text-[#1f1f1f] font-medium text-[15px] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed border-none shadow-[0_1px_3px_rgba(0,0,0,0.3)] cursor-pointer gap-3"
               >
                 <GoogleLogo className="w-5 h-5" />
@@ -227,11 +238,11 @@ export function GoogleAuthDialog({ open, onOpenChange }: GoogleAuthDialogProps) 
             {isConnected && (
               <Button
                 onClick={handleDisconnect}
-                disabled={loading}
+                disabled={isDisconnecting}
                 className="w-full h-[52px] bg-[#EA4335]/10 hover:bg-[#EA4335]/20 text-[#EA4335] font-medium text-[15px] rounded-xl transition-all active:scale-[0.98] disabled:opacity-50 border border-[#EA4335]/20 cursor-pointer gap-2"
               >
                 <LogOut className="w-4 h-4" />
-                {loading ? 'Disconnecting...' : 'Disconnect Account'}
+                {isDisconnecting ? 'Disconnecting...' : 'Disconnect Account'}
               </Button>
             )}
           </div>
