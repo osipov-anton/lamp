@@ -289,8 +289,8 @@ export class OpenRouterProviderAdapter implements ModelProvider {
     return messages.map((m) => {
       const msg: Record<string, unknown> = { role: m.role }
 
-      if (m.role === 'user' && m.attachments && m.attachments.length > 0) {
-        msg.content = this.buildUserContentParts(m)
+      if (m.attachments && m.attachments.length > 0) {
+        msg.content = this.buildContentParts(m)
       } else if (m.content !== undefined) {
         msg.content = m.content
       } else if (m.toolCalls) {
@@ -313,7 +313,7 @@ export class OpenRouterProviderAdapter implements ModelProvider {
     })
   }
 
-  private buildUserContentParts(message: NormalizedMessage): Array<Record<string, unknown>> {
+  private buildContentParts(message: NormalizedMessage): Array<Record<string, unknown>> {
     const contentParts: Array<Record<string, unknown>> = []
 
     if (message.content && message.content.trim().length > 0) {

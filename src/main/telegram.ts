@@ -1,3 +1,6 @@
+import { app } from 'electron'
+import { mkdir, readFile, writeFile } from 'fs/promises'
+import { join, extname } from 'path'
 import { TelegramClient, Api } from 'telegram'
 import { StringSession } from 'telegram/sessions'
 import { computeCheck } from 'telegram/Password'
@@ -13,6 +16,19 @@ export type TelegramConnectionStatus = 'disconnected' | 'connecting' | 'connecte
 interface CachedPeer {
   entity: EntityLike
   resolvedAt: number
+}
+
+export interface TelegramImageAttachment {
+  filePath: string
+  mimeType: string
+}
+
+export interface TelegramMessageRecord {
+  id: number
+  sender: string
+  text: string
+  date: number
+  images?: TelegramImageAttachment[]
 }
 
 const PEER_CACHE_TTL_MS = 10 * 60_000
@@ -210,23 +226,11 @@ export class TelegramService {
   async getMessages(
     chatName: string,
     limit = 20
-  ): Promise<
-    Array<{
-      id: number
-      sender: string
-      text: string
-      date: number
-    }>
-  > {
+  ): Promise<TelegramMessageRecord[]> {
     if (!this.client) throw new Error('Not connected')
     const peer = await this.resolvePeer(chatName)
     const messages = await this.client.getMessages(peer, { limit })
-    return messages.map((m) => ({
-      id: m.id,
-      sender: this.extractSenderName(m),
-      text: m.message ?? '',
-      date: (m.date ?? 0) * 1000
-    }))
+    return Promise.all(messages.map((message) => this.toMessageRecord(message)))
   }
 
   async sendMessage(chatName: string, text: string): Promise<{ messageId: number }> {
@@ -279,6 +283,7 @@ export class TelegramService {
       sender: string
       text: string
       date: number
+      images?: TelegramImageAttachment[]
     }>
   > {
     if (!this.client) throw new Error('Not connected')
@@ -286,12 +291,18 @@ export class TelegramService {
     if (chatName) {
       const peer = await this.resolvePeer(chatName)
       const messages = await this.client.getMessages(peer, { search: query, limit })
-      return messages.map((m) => ({
-        chatTitle: chatName,
-        sender: this.extractSenderName(m),
-        text: m.message ?? '',
-        date: (m.date ?? 0) * 1000
-      }))
+      return Promise.all(
+        messages.map(async (message) => {
+          const record = await this.toMessageRecord(message)
+          return {
+            chatTitle: chatName,
+            sender: record.sender,
+            text: record.text,
+            date: record.date,
+            images: record.images
+          }
+        })
+      )
     }
 
     const result = await this.client.invoke(
@@ -308,12 +319,27 @@ export class TelegramService {
     )
 
     const messages = 'messages' in result ? result.messages : []
-    return messages.map((m) => ({
-      chatTitle: '',
-      sender: 'fromId' in m && m.fromId ? String(m.fromId) : 'unknown',
-      text: 'message' in m ? (m.message ?? '') : '',
-      date: ('date' in m ? (m.date ?? 0) : 0) * 1000
-    }))
+    return Promise.all(
+      messages.map(async (message) => {
+        if (message instanceof Api.Message) {
+          const record = await this.toMessageRecord(message)
+          return {
+            chatTitle: '',
+            sender: record.sender,
+            text: record.text,
+            date: record.date,
+            images: record.images
+          }
+        }
+
+        return {
+          chatTitle: '',
+          sender: 'fromId' in message && message.fromId ? String(message.fromId) : 'unknown',
+          text: 'message' in message ? (message.message ?? '') : '',
+          date: ('date' in message ? (message.date ?? 0) : 0) * 1000
+        }
+      })
+    )
   }
 
   private extractSenderName(msg: Api.Message): string {
@@ -329,6 +355,88 @@ export class TelegramService {
     }
     return 'Unknown'
   }
+
+  private async toMessageRecord(message: Api.Message): Promise<TelegramMessageRecord> {
+    return {
+      id: message.id,
+      sender: this.extractSenderName(message),
+      text: message.message ?? '',
+      date: (message.date ?? 0) * 1000,
+      images: await this.extractImageAttachments(message)
+    }
+  }
+
+  private async extractImageAttachments(message: Api.Message): Promise<TelegramImageAttachment[]> {
+    if (!this.client || !message.media) return []
+
+    if (message.media instanceof Api.MessageMediaPhoto) {
+      const filePath = await this.downloadPhotoMedia(message)
+      return filePath ? [{ filePath, mimeType: 'image/jpeg' }] : []
+    }
+
+    if (message.media instanceof Api.MessageMediaDocument) {
+      const document = message.media.document
+      if (!(document instanceof Api.Document)) return []
+      const mimeType = document.mimeType || ''
+      if (!mimeType.startsWith('image/')) return []
+      const filePath = await this.downloadDocumentImage(message, document, mimeType)
+      return filePath ? [{ filePath, mimeType }] : []
+    }
+
+    return []
+  }
+
+  private async downloadPhotoMedia(message: Api.Message): Promise<string | null> {
+    const media = message.media
+    if (!(media instanceof Api.MessageMediaPhoto)) return null
+
+    const photoId =
+      media.photo instanceof Api.Photo ? media.photo.id.toString() : `message-${message.id}`
+    const filePath = await this.buildMediaPath(`photo-${photoId}`, '.jpg')
+    if (await fileExists(filePath)) return filePath
+
+    const payload = await this.client?.downloadMedia(message, {})
+    const buffer = await toBuffer(payload)
+    if (!buffer) return null
+    await writeFile(filePath, buffer)
+    return filePath
+  }
+
+  private async downloadDocumentImage(
+    message: Api.Message,
+    document: Api.Document,
+    mimeType: string
+  ): Promise<string | null> {
+    const originalName = this.getDocumentFileName(document)
+    const fallbackBase = `document-${document.id.toString()}`
+    const extension = extname(originalName) || mimeTypeToExtension(mimeType) || '.img'
+    const baseName = stripExtension(originalName) || fallbackBase
+    const filePath = await this.buildMediaPath(baseName, extension)
+    if (await fileExists(filePath)) return filePath
+
+    const payload = await this.client?.downloadMedia(message, {})
+    const buffer = await toBuffer(payload)
+    if (!buffer) return null
+    await writeFile(filePath, buffer)
+    return filePath
+  }
+
+  private getDocumentFileName(document: Api.Document): string {
+    for (const attribute of document.attributes) {
+      if (attribute instanceof Api.DocumentAttributeFilename) {
+        return attribute.fileName
+      }
+    }
+    return ''
+  }
+
+  private async buildMediaPath(baseName: string, extension: string): Promise<string> {
+    const dir = join(app.getPath('userData'), 'lamp-data', 'telegram-media')
+    await mkdir(dir, { recursive: true })
+    const safeBase = sanitizeFileName(baseName) || 'telegram-image'
+    const safeExtension = extension.startsWith('.') ? extension : `.${extension}`
+    return join(dir, `${safeBase}${safeExtension}`)
+  }
 }
 
 let telegramService: TelegramService | null = null
@@ -338,4 +446,56 @@ export function getTelegramService(): TelegramService {
     telegramService = new TelegramService()
   }
   return telegramService
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await readFile(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function toBuffer(value: string | Buffer | undefined): Promise<Buffer | null> {
+  if (!value) return null
+  if (Buffer.isBuffer(value)) return value
+  try {
+    return await readFile(value)
+  } catch {
+    return null
+  }
+}
+
+function sanitizeFileName(value: string): string {
+  return value
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function stripExtension(value: string): string {
+  const extension = extname(value)
+  return extension ? value.slice(0, -extension.length) : value
+}
+
+function mimeTypeToExtension(mimeType: string): string | undefined {
+  switch (mimeType.toLowerCase()) {
+    case 'image/jpeg':
+      return '.jpg'
+    case 'image/png':
+      return '.png'
+    case 'image/gif':
+      return '.gif'
+    case 'image/webp':
+      return '.webp'
+    case 'image/bmp':
+      return '.bmp'
+    case 'image/heic':
+      return '.heic'
+    case 'image/heif':
+      return '.heif'
+    default:
+      return undefined
+  }
 }

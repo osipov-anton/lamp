@@ -5,6 +5,7 @@ import { withProxyRequestInit } from '../network/proxyDispatcher'
 interface AppSettings {
   openRouterApiKey: string
   model: string
+  memoryModel: string
   proxyUrl: string
   telegramSession?: string
 }

@@ -19,10 +19,132 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+interface ModelSelectProps {
+  label: string
+  value: string
+  helperText?: string
+  models: Array<{ id: string; name: string }>
+  modelsLoading: boolean
+  onChange: (modelId: string) => void
+}
+
+function ModelSelect({
+  label,
+  value,
+  helperText,
+  models,
+  modelsLoading,
+  onChange
+}: ModelSelectProps) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+    }
+  }, [open])
+
+  const filteredModels = useMemo(() => {
+    if (!search.trim()) return models
+    const query = search.toLowerCase()
+    return models.filter(
+      (model) =>
+        model.id.toLowerCase().includes(query) || model.name.toLowerCase().includes(query)
+    )
+  }, [models, search])
+
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium">{label}</label>
+      <div ref={dropdownRef} className="relative">
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          onClick={() => {
+            setOpen((prev) => !prev)
+            if (open) setSearch('')
+          }}
+          className="h-auto w-full items-center justify-between py-2 font-normal"
+        >
+          <span className="min-w-0 text-left">
+            <span className="block truncate text-sm">
+              {models.find((model) => model.id === value)?.name ?? value}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">{value}</span>
+          </span>
+          <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
+        </Button>
+        {open && (
+          <div className="absolute left-0 right-0 top-full z-[70] mt-1 overflow-hidden rounded-md border bg-popover shadow-md">
+            <div className="flex items-center border-b px-2 py-1.5">
+              <Search className="size-4 shrink-0 text-muted-foreground" />
+              <input
+                autoFocus
+                placeholder="Search models..."
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="flex h-8 w-full bg-transparent py-1.5 pl-2 pr-2 text-sm outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+            <ScrollArea className="max-h-[240px]">
+              {modelsLoading ? (
+                <div className="py-6 text-center text-sm text-muted-foreground">
+                  Loading models...
+                </div>
+              ) : filteredModels.length === 0 ? (
+                <div className="py-6 text-center text-sm text-muted-foreground">
+                  No models found
+                </div>
+              ) : (
+                <div className="p-1">
+                  {filteredModels.map((model) => (
+                    <button
+                      key={model.id}
+                      type="button"
+                      onClick={() => {
+                        onChange(model.id)
+                        setOpen(false)
+                        setSearch('')
+                      }}
+                      className={cn(
+                        'flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-sm px-2.5 py-2 text-left outline-none transition-colors hover:bg-accent hover:text-accent-foreground',
+                        value === model.id && 'bg-accent text-accent-foreground'
+                      )}
+                    >
+                      <span className="w-full truncate text-sm">{model.name}</span>
+                      <span className="w-full truncate text-xs text-muted-foreground">
+                        {model.id}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        )}
+      </div>
+      {helperText ? <p className="text-xs text-muted-foreground">{helperText}</p> : null}
+    </div>
+  )
+}
+
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [settings, setSettings] = useState<AppSettings>({
     openRouterApiKey: '',
     model: 'openai/gpt-4o-mini',
+    memoryModel: 'openai/gpt-4o-mini',
     proxyUrl: ''
   })
   const [showKey, setShowKey] = useState(false)
@@ -30,9 +152,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [saved, setSaved] = useState(false)
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([])
   const [modelsLoading, setModelsLoading] = useState(false)
-  const [modelSearch, setModelSearch] = useState('')
-  const [modelOpen, setModelOpen] = useState(false)
-  const modelDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (open) {
@@ -52,29 +171,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     }
   }, [open])
 
-  useEffect(() => {
-    if (!modelOpen) return
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(target)) {
-        setModelOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onPointerDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-    }
-  }, [modelOpen])
-
-  const filteredModels = useMemo(() => {
-    if (!modelSearch.trim()) return models
-    const q = modelSearch.toLowerCase()
-    return models.filter(
-      (m) =>
-        m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
-    )
-  }, [models, modelSearch])
-
   const handleSave = async () => {
     setSaving(true)
     await window.api.settings.save(settings)
@@ -92,7 +188,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Configure your AI provider and model.
+            Configure your AI provider and models.
           </DialogDescription>
         </DialogHeader>
 
@@ -130,80 +226,22 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </p>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Model</label>
-            <div ref={modelDropdownRef} className="relative">
-                <Button
-                  type="button"
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={modelOpen}
-                  onClick={() => {
-                    setModelOpen((prev) => !prev)
-                    if (modelOpen) setModelSearch('')
-                  }}
-                  className="h-auto w-full items-center justify-between py-2 font-normal"
-                >
-                  <span className="min-w-0 text-left">
-                    <span className="block truncate text-sm">
-                      {models.find((m) => m.id === settings.model)?.name ?? settings.model}
-                    </span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {settings.model}
-                    </span>
-                  </span>
-                  <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
-                </Button>
-                {modelOpen && (
-                  <div className="absolute left-0 right-0 top-full z-[70] mt-1 overflow-hidden rounded-md border bg-popover shadow-md">
-                    <div className="flex items-center border-b px-2 py-1.5">
-                      <Search className="size-4 shrink-0 text-muted-foreground" />
-                      <input
-                        autoFocus
-                        placeholder="Search models..."
-                        value={modelSearch}
-                        onChange={(e) => setModelSearch(e.target.value)}
-                        className="flex h-8 w-full bg-transparent py-1.5 pl-2 pr-2 text-sm outline-none placeholder:text-muted-foreground"
-                      />
-                    </div>
-                    <ScrollArea className="max-h-[240px]">
-                      {modelsLoading ? (
-                        <div className="py-6 text-center text-sm text-muted-foreground">
-                          Loading models...
-                        </div>
-                      ) : filteredModels.length === 0 ? (
-                        <div className="py-6 text-center text-sm text-muted-foreground">
-                          No models found
-                        </div>
-                      ) : (
-                        <div className="p-1">
-                          {filteredModels.map((m) => (
-                            <button
-                              key={m.id}
-                              type="button"
-                              onClick={() => {
-                                setSettings((s) => ({ ...s, model: m.id }))
-                                setModelOpen(false)
-                                setModelSearch('')
-                              }}
-                              className={cn(
-                                'flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-sm px-2.5 py-2 text-left outline-none transition-colors hover:bg-accent hover:text-accent-foreground',
-                                settings.model === m.id && 'bg-accent text-accent-foreground'
-                              )}
-                            >
-                              <span className="w-full truncate text-sm">{m.name}</span>
-                              <span className="w-full truncate text-xs text-muted-foreground">
-                                {m.id}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </ScrollArea>
-                  </div>
-                )}
-            </div>
-          </div>
+          <ModelSelect
+            label="Chat model"
+            value={settings.model}
+            models={models}
+            modelsLoading={modelsLoading}
+            onChange={(model) => setSettings((current) => ({ ...current, model }))}
+          />
+
+          <ModelSelect
+            label="Memory model"
+            value={settings.memoryModel}
+            helperText="Used for memory curation and fact extraction. Keep it cheaper/faster if you want background memory runs to cost less."
+            models={models}
+            modelsLoading={modelsLoading}
+            onChange={(memoryModel) => setSettings((current) => ({ ...current, memoryModel }))}
+          />
 
           <div className="space-y-2">
             <label className="text-sm font-medium">Proxy URL (optional)</label>

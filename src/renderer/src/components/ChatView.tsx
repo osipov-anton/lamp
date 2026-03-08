@@ -87,7 +87,9 @@ export function ChatView({
   const [threadInput, setThreadInput] = useState('')
   const [settings, setSettings] = useState<AppSettings>({
     openRouterApiKey: '',
-    model: 'openai/gpt-4o-mini'
+    model: 'openai/gpt-5.4',
+    memoryModel: 'anthropic/claude-sonnet-4.6',
+    proxyUrl: ''
   })
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([])
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -657,11 +659,12 @@ export function ChatView({
               {sideThread.messages.map((msg, index) => {
                 const prevMsg = index > 0 ? sideThread.messages[index - 1] : null
                 const showAvatar = !prevMsg || prevMsg.role !== msg.role
-                const msgIsStreaming =
+                const msgIsStreaming = Boolean(
                   isThreadStreaming &&
                   index === sideThread.messages.length - 1 &&
                   msg.role === 'assistant' &&
                   msg.content === ''
+                )
                 const content =
                   msgIsStreaming && streamingContent ? { ...msg, content: streamingContent } : msg
                 return (

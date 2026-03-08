@@ -238,20 +238,42 @@ export function createTelegramReadMessagesTool(service: TelegramService): ToolDe
 
       try {
         const messages = await service.getMessages(chatName, limit)
+        let imageIndex = 0
         const lines = messages.map((m) => {
           const date = new Date(m.date).toLocaleString()
-          return `[${date}] ${m.sender}: ${m.text}`
+          const imageSummary =
+            m.images && m.images.length > 0
+              ? ` [${m.images.length} image${m.images.length === 1 ? '' : 's'} attached]`
+              : ''
+          const text = m.text?.trim() ? m.text : '(no text)'
+          return `[${date}] ${m.sender}: ${text}${imageSummary}`
         })
+        const content = []
         const text =
           lines.length > 0
             ? `Messages from "${chatName}" (${lines.length}):\n${lines.join('\n')}`
             : `No messages found in "${chatName}".`
 
+        content.push({ type: 'text' as const, text })
+        for (const message of messages) {
+          for (const image of message.images ?? []) {
+            imageIndex += 1
+            const date = new Date(message.date).toLocaleString()
+            const caption = message.text?.trim() ? ` Caption: ${message.text.trim()}` : ''
+            content.push({
+              type: 'image' as const,
+              mimeType: image.mimeType,
+              filePath: image.filePath,
+              alt: `Telegram image ${imageIndex} from ${message.sender} at ${date}.${caption}`
+            })
+          }
+        }
+
         return {
           callId: '',
           toolId: TELEGRAM_READ_MESSAGES_ID,
           success: true,
-          content: [{ type: 'text', text }],
+          content,
           durationMs: Date.now() - startTime
         }
       } catch (err) {
@@ -423,21 +445,44 @@ export function createTelegramSearchMessagesTool(service: TelegramService): Tool
 
       try {
         const results = await service.searchMessages(query, chatName, limit)
+        let imageIndex = 0
         const lines = results.map((r) => {
           const date = new Date(r.date).toLocaleString()
           const chat = r.chatTitle ? `[${r.chatTitle}] ` : ''
-          return `${chat}[${date}] ${r.sender}: ${r.text}`
+          const imageSummary =
+            r.images && r.images.length > 0
+              ? ` [${r.images.length} image${r.images.length === 1 ? '' : 's'} attached]`
+              : ''
+          const text = r.text?.trim() ? r.text : '(no text)'
+          return `${chat}[${date}] ${r.sender}: ${text}${imageSummary}`
         })
+        const content = []
         const text =
           lines.length > 0
             ? `Found ${lines.length} result(s) for "${query}" ${scope}:\n${lines.join('\n')}`
             : `No results found for "${query}" ${scope}.`
 
+        content.push({ type: 'text' as const, text })
+        for (const result of results) {
+          for (const image of result.images ?? []) {
+            imageIndex += 1
+            const date = new Date(result.date).toLocaleString()
+            const chat = result.chatTitle ? ` in ${result.chatTitle}` : ''
+            const caption = result.text?.trim() ? ` Caption: ${result.text.trim()}` : ''
+            content.push({
+              type: 'image' as const,
+              mimeType: image.mimeType,
+              filePath: image.filePath,
+              alt: `Telegram search image ${imageIndex} from ${result.sender}${chat} at ${date}.${caption}`
+            })
+          }
+        }
+
         return {
           callId: '',
           toolId: TELEGRAM_SEARCH_MESSAGES_ID,
           success: true,
-          content: [{ type: 'text', text }],
+          content,
           durationMs: Date.now() - startTime
         }
       } catch (err) {

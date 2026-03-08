@@ -1,5 +1,6 @@
 import type { SupervisorRouter } from '../orchestrator/SupervisorRouter'
 import { buildMemoryCuratorSystemPrompt } from '../bootstrap'
+import { getSettings } from '../../store'
 
 interface ThreadMessageSnapshot {
   role: 'user' | 'assistant' | 'system' | 'tool'
@@ -36,6 +37,9 @@ export class ChatIdleAnalyzer {
     try {
       const curator = this.router.getAgent('memory_curator')
       if (curator) {
+        const settings = getSettings()
+        curator.modelConfig.model =
+          settings.memoryModel || settings.model || 'openai/gpt-4o-mini'
         curator.systemPrompt = buildMemoryCuratorSystemPrompt(new Date())
       }
 

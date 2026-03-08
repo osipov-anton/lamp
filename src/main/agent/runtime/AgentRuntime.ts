@@ -1,3 +1,4 @@
+import { readFile } from 'fs/promises'
 import type {
   AgentDefinition,
   AgentRuntimePhase,
@@ -129,9 +130,12 @@ export class AgentRuntime {
               }
             }
 
+            const attachments = await this.normalizeToolAttachments(result.content)
+
             conversationMessages.push({
               role: 'tool',
               toolCallId: result.callId,
+              attachments: attachments.length > 0 ? attachments : undefined,
               content: result.success
                 ? result.content
                     .filter((c): c is ToolResultContent & { type: 'text' } => c.type === 'text')
@@ -405,6 +409,30 @@ export class AgentRuntime {
       ...extra
     }
     this.bus.emit({ kind: 'tool_lifecycle', event })
+  }
+
+  private async normalizeToolAttachments(
+    content: ToolResultContent[]
+  ): Promise<NonNullable<NormalizedMessage['attachments']>> {
+    const attachments: NonNullable<NormalizedMessage['attachments']> = []
+
+    for (const part of content) {
+      if (part.type !== 'image') continue
+
+      try {
+        const buffer = await readFile(part.filePath)
+        attachments.push({
+          type: 'image',
+          name: part.alt ?? part.filePath.split('/').pop() ?? 'tool-image',
+          mimeType: part.mimeType,
+          dataUrl: `data:${part.mimeType};base64,${buffer.toString('base64')}`
+        })
+      } catch {
+        // Skip unreadable tool images but keep textual output.
+      }
+    }
+
+    return attachments
   }
 }
 

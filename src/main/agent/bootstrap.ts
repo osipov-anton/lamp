@@ -104,7 +104,7 @@ function createDefaultAgent(): AgentDefinition {
 function createMemoryCuratorAgent(): AgentDefinition {
   let model = 'openai/gpt-4o-mini'
   try {
-    model = getSettings().model || model
+    model = getSettings().memoryModel || getSettings().model || model
   } catch {
     // store not ready yet, use default
   }
@@ -150,7 +150,8 @@ export function bootstrapAgentSystem(): AgentSystem {
   })
   const factExtraction = new FactExtractionService(
     () => getSettings().openRouterApiKey,
-    () => getSettings().proxyUrl
+    () => getSettings().proxyUrl,
+    () => getSettings().memoryModel || getSettings().model || 'openai/gpt-4o-mini'
   )
   const memoryGraphService = new MemoryGraphService(memoryGraph)
 

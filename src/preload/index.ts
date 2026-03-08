@@ -49,7 +49,7 @@ const agentAPI = {
 
 const settingsAPI = {
   get: () => ipcRenderer.invoke('settings:get'),
-  save: (settings: { openRouterApiKey: string; model: string; proxyUrl: string }) =>
+  save: (settings: { openRouterApiKey: string; model: string; memoryModel: string; proxyUrl: string }) =>
     ipcRenderer.invoke('settings:save', settings),
   fetchModels: () =>
     ipcRenderer.invoke('settings:fetch-models') as Promise<

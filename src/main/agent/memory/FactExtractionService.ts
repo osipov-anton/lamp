@@ -17,7 +17,7 @@ export class FactExtractionService {
   constructor(
     private readonly getApiKey: () => string,
     private readonly getProxyUrl: () => string | undefined = () => undefined,
-    private readonly model: string = 'openai/gpt-4o-mini'
+    private readonly getModel: () => string = () => 'openai/gpt-4o-mini'
   ) {}
 
   async extractFromText(input: {
@@ -27,6 +27,7 @@ export class FactExtractionService {
     content: string
   }): Promise<ExtractedFact[]> {
     const apiKey = this.getApiKey()
+    const model = this.getModel().trim() || 'openai/gpt-4o-mini'
     const text = input.content.trim()
     if (!apiKey || !text) return []
 
@@ -43,7 +44,7 @@ export class FactExtractionService {
               'X-Title': 'Lamp Desktop'
             },
             body: JSON.stringify({
-              model: this.model,
+              model,
               temperature: 0,
               messages: [
                 {

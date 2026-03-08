@@ -44,6 +44,7 @@ export interface ChatAttachment {
 interface AppSettings {
   openRouterApiKey: string
   model: string
+  memoryModel: string
   proxyUrl: string
   telegramSession?: string
   googleRefreshToken?: string
@@ -71,6 +72,7 @@ const DEFAULT_DATA: StoreData = {
   settings: {
     openRouterApiKey: '',
     model: 'openai/gpt-4o-mini',
+    memoryModel: 'openai/gpt-4o-mini',
     proxyUrl: ''
   },
   agentPresets: []
@@ -359,6 +361,7 @@ function normalizeStoreData(input: StoreData): { data: StoreData; changed: boole
     !input.settings ||
     typeof input.settings.proxyUrl !== 'string' ||
     typeof input.settings.model !== 'string' ||
+    typeof input.settings.memoryModel !== 'string' ||
     typeof input.settings.openRouterApiKey !== 'string'
   ) {
     changed = true

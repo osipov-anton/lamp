@@ -216,6 +216,12 @@ export function registerChatHandlers(
         mainAgent.modelConfig.model = settings.model
       }
 
+      const memoryCurator = router.getAgent('memory_curator')
+      const memoryModel = settings.memoryModel || settings.model || 'openai/gpt-4o-mini'
+      if (memoryCurator && memoryCurator.modelConfig.model !== memoryModel) {
+        memoryCurator.modelConfig.model = memoryModel
+      }
+
       if (mainAgent) {
         mainAgent.systemPrompt = buildSystemPrompt(agentInstruction)
       }
