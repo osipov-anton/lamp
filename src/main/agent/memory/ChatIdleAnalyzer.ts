@@ -39,7 +39,7 @@ export class ChatIdleAnalyzer {
       if (curator) {
         const settings = getSettings()
         curator.modelConfig.model =
-          settings.memoryModel || settings.model || 'openai/gpt-4o-mini'
+          settings.memoryModel || settings.model || 'anthropic/claude-sonnet-4.6'
         curator.systemPrompt = buildMemoryCuratorSystemPrompt(new Date())
       }
 

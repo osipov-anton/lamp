@@ -143,8 +143,8 @@ function ModelSelect({
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [settings, setSettings] = useState<AppSettings>({
     openRouterApiKey: '',
-    model: 'openai/gpt-4o-mini',
-    memoryModel: 'openai/gpt-4o-mini',
+    model: 'openai/gpt-5.4',
+    memoryModel: 'anthropic/claude-sonnet-4.6',
     proxyUrl: ''
   })
   const [showKey, setShowKey] = useState(false)

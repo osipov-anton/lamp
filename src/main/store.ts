@@ -71,8 +71,8 @@ const DEFAULT_DATA: StoreData = {
   chats: [],
   settings: {
     openRouterApiKey: '',
-    model: 'openai/gpt-4o-mini',
-    memoryModel: 'openai/gpt-4o-mini',
+    model: 'openai/gpt-5.4',
+    memoryModel: 'anthropic/claude-sonnet-4.6',
     proxyUrl: ''
   },
   agentPresets: []

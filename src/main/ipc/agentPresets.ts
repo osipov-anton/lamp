@@ -54,7 +54,7 @@ export function registerAgentPresetHandlers(): void {
             'HTTP-Referer': 'https://lamp-desktop.app'
           },
           body: JSON.stringify({
-            model: settings.model || 'openai/gpt-4o-mini',
+            model: settings.model || 'openai/gpt-5.4',
             messages: [
               { role: 'system', content: IMPROVE_PROMPT_INSTRUCTION },
               { role: 'user', content: draft }

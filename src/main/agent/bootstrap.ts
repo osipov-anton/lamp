@@ -151,7 +151,8 @@ export function bootstrapAgentSystem(): AgentSystem {
   const factExtraction = new FactExtractionService(
     () => getSettings().openRouterApiKey,
     () => getSettings().proxyUrl,
-    () => getSettings().memoryModel || getSettings().model || 'openai/gpt-4o-mini'
+    () =>
+      getSettings().memoryModel || getSettings().model || 'anthropic/claude-sonnet-4.6'
   )
   const memoryGraphService = new MemoryGraphService(memoryGraph)
 

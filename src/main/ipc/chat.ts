@@ -217,7 +217,8 @@ export function registerChatHandlers(
       }
 
       const memoryCurator = router.getAgent('memory_curator')
-      const memoryModel = settings.memoryModel || settings.model || 'openai/gpt-4o-mini'
+      const memoryModel =
+        settings.memoryModel || settings.model || 'anthropic/claude-sonnet-4.6'
       if (memoryCurator && memoryCurator.modelConfig.model !== memoryModel) {
         memoryCurator.modelConfig.model = memoryModel
       }
