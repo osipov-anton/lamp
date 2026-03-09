@@ -21,6 +21,7 @@ import type { SupervisorRouter } from '../agent/orchestrator/SupervisorRouter'
 import type { OpenRouterProviderAdapter } from '../agent/providers/openrouter/OpenRouterProviderAdapter'
 import type { NormalizedMessage } from '../agent/runtime/types'
 import type { MemoryGraphPort } from '../storage/ports/MemoryGraphPort'
+import type { ToolCallCollector } from './agent'
 
 import { ChatIdleAnalyzer } from '../agent/memory/ChatIdleAnalyzer'
 import { getTelegramService } from '../telegram'
@@ -86,7 +87,8 @@ let cachedModelCapabilities: CachedModelCapabilities | null = null
 export function registerChatHandlers(
   router: SupervisorRouter,
   openRouterProvider: OpenRouterProviderAdapter,
-  memoryGraph: MemoryGraphPort
+  memoryGraph: MemoryGraphPort,
+  toolCallCollector: ToolCallCollector
 ): void {
   const idleAnalyzer = new ChatIdleAnalyzer(router, (chatId, threadId) =>
     getThreadHistory(chatId, threadId).map((m) => ({
@@ -301,20 +303,44 @@ export function registerChatHandlers(
       }, thread.id)
 
       const fullHistory = getThreadHistory(chatId, thread.id)
-      const threadContextMessages: NormalizedMessage[] = await Promise.all(
-        fullHistory
-          .filter((m) => m.id !== assistantMessageId)
-          .map(async (m) => {
-            const normalized: NormalizedMessage = {
-              role: m.role as NormalizedMessage['role'],
-              content: m.content
-            }
-            if (m.role === 'user' && m.attachments && m.attachments.length > 0) {
-              normalized.attachments = await normalizeAttachmentsForModel(m.attachments)
-            }
-            return normalized
+      const threadContextMessages: NormalizedMessage[] = []
+      for (const m of fullHistory) {
+        if (m.id === assistantMessageId) continue
+
+        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+          threadContextMessages.push({
+            role: 'assistant',
+            content: null,
+            toolCalls: m.toolCalls.map((tc) => ({
+              callId: tc.callId,
+              toolName: tc.toolName,
+              arguments: tc.arguments
+            }))
           })
-      )
+          for (const tc of m.toolCalls) {
+            threadContextMessages.push({
+              role: 'tool',
+              toolCallId: tc.callId,
+              content: tc.result?.success
+                ? (tc.result.content ?? '')
+                : `Error: ${tc.result?.error ?? 'unknown error'}`
+            })
+          }
+          if (m.content) {
+            threadContextMessages.push({ role: 'assistant', content: m.content })
+          }
+          continue
+        }
+
+        const normalized: NormalizedMessage = {
+          role: m.role as NormalizedMessage['role'],
+          content: m.content
+        }
+        if (m.role === 'user' && m.attachments && m.attachments.length > 0) {
+          normalized.attachments = await normalizeAttachmentsForModel(m.attachments)
+        }
+        threadContextMessages.push(normalized)
+      }
       const messages: NormalizedMessage[] =
         thread.anchorQuote && thread.anchorQuote.trim().length > 0
           ? [
@@ -336,7 +362,8 @@ export function registerChatHandlers(
         fullHistory.length,
         win,
         memoryGraph,
-        idleAnalyzer
+        idleAnalyzer,
+        toolCallCollector
       )
     }
   )
@@ -357,13 +384,15 @@ function runAgent(
   messageCount: number,
   win: BrowserWindow,
   memoryGraph: MemoryGraphPort,
-  idleAnalyzer: ChatIdleAnalyzer
+  idleAnalyzer: ChatIdleAnalyzer,
+  toolCallCollector: ToolCallCollector
 ): void {
   router
     .executeRun('main', chatId, threadId, messages)
     .then((finalText) => {
       console.log('[agent] run completed, finalText length:', finalText.length)
-      updateMessage(chatId, assistantMessageId, finalText, threadId)
+      const storedToolCalls = toolCallCollector.drain(chatId, threadId)
+      updateMessage(chatId, assistantMessageId, finalText, threadId, storedToolCalls)
       let effectiveTitle: string | undefined
       if (messageCount <= 2) {
         effectiveTitle = finalText.slice(0, 50).split('\n')[0] || 'New Chat'

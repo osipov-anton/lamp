@@ -36,6 +36,27 @@ import { FactExtractionService } from './memory/FactExtractionService'
 import { MemoryGraphService } from './memory/MemoryGraphService'
 import { getTelegramService } from '../telegram'
 import { getGoogleService } from '../google'
+import {
+  createRunDeveloperTool,
+  createListIntegrationsTool,
+  createDeleteIntegrationTool
+} from './tools/integrationBuilderTools'
+import { getGeneratedIntegrationService } from './generated/GeneratedIntegrationService'
+import {
+  createReadFileTool,
+  createWriteFileTool,
+  createApplyPatchTool,
+  createListDirTool,
+  createSearchFilesTool,
+  createDeleteFileTool,
+  createRunCommandTool,
+  ALL_DEV_TOOL_IDS
+} from './tools/devTools'
+import {
+  createActivateIntegrationTool,
+  ACTIVATE_INTEGRATION_TOOL_ID
+} from './tools/activateIntegrationTool'
+import { notifyIntegrationChanged } from '../ipc/integrations'
 
 export interface AgentSystem {
   bus: ArtifactBus
@@ -46,6 +67,7 @@ export interface AgentSystem {
   memoryGraph: MemoryGraphPort
   factExtraction: FactExtractionService
   memoryGraphService: MemoryGraphService
+  integrationService: ReturnType<typeof getGeneratedIntegrationService>
 }
 
 export function buildMemoryCuratorSystemPrompt(now: Date = new Date()): string {
@@ -91,12 +113,43 @@ function createDefaultAgent(): AgentDefinition {
       '- Example: queries=["Elena Chasova", "Елена мама пользователя", "user mother"] expandRelated=true\n' +
       'Do not skip this step.\n\n' +
       'TOOLS:\n' +
-      '- memory_query: search stored facts and knowledge about the user (ALWAYS use proactively with multiple queries)\n' +
+      '- memory_query: search stored facts and knowledge about the user (ALWAYS use proactively)\n' +
       '- web_search: look up real-time information from the internet\n' +
-      '- search_messages: search raw chat history for past conversations',
+      '- search_messages: search raw chat history for past conversations\n' +
+      '- read_file / list_dir: inspect files in lamp-data/ (e.g. generated-integrations/)\n' +
+      '- run_developer: delegate a coding task to the developer agent (file system, shell, web search)\n' +
+      '- list_integrations: check what integrations are installed\n' +
+      '- delete_integration: remove an integration\n' +
+      '- activate_integration: enable a built integration by its id\n\n' +
+      'INTEGRATIONS:\n' +
+      'You CAN build integrations for ANY external service. You are NOT limited to pre-built tools.\n' +
+      'NEVER say you cannot connect to a service.\n\n' +
+      'Integration workflow:\n' +
+      '1. Use list_dir("generated-integrations") and read_file to inspect existing integrations\n' +
+      '2. Use run_developer(task) to build or modify an integration — include ALL conventions below in the task\n' +
+      '3. IMPORTANT: After run_developer finishes, you MUST call activate_integration(id) to register the tools and prompt the user for API keys. Do NOT skip this step.\n\n' +
+      'When calling run_developer for an integration, include these conventions in the task:\n' +
+      '- Directory: generated-integrations/{id}/\n' +
+      '- Files: index.ts (or main.py), manifest.json, package.json (or requirements.txt)\n' +
+      '- Script pattern (TS): actions record, parse process.argv[2] as JSON {action, arguments}, call action fn, print JSON {success,data} or {success:false,error}\n' +
+      '- Script pattern (Python): actions dict, parse sys.argv[1], print JSON result\n' +
+      '- manifest.json: {id, name, description, language, entrypoint, dependencies, envVars[{name,description,required}], tools[{name,action,description,inputSchema}], status:"pending_approval", envValues:{}, codeHash:"", createdAt:0, updatedAt:0}\n' +
+      '- Install deps: run_command("npm install", "generated-integrations/{id}/")\n' +
+      '- Test before finishing: run_command(\'npx tsx index.ts \'\'{"action":"...","arguments":{}}\'\'\')\n' +
+      '- Tool names must be prefixed with integration id (e.g. stripe_list_customers)\n' +
+      '- Use web_search to look up API docs if needed\n' +
+      '- At the end of the task, clearly report the integration id (directory name)',
     modelConfig: { model },
-    maxIterations: 10,
-    allowedTools: ['web_search', 'search_messages', 'memory_query', ...ALL_TELEGRAM_TOOL_IDS, ...ALL_GOOGLE_TOOL_IDS],
+    maxIterations: 15,
+    allowedTools: [
+      'web_search', 'search_messages', 'memory_query',
+      'read_file', 'list_dir',
+      'run_developer',
+      'list_integrations', 'delete_integration',
+      ACTIVATE_INTEGRATION_TOOL_ID,
+      ...ALL_TELEGRAM_TOOL_IDS,
+      ...ALL_GOOGLE_TOOL_IDS
+    ],
     providerProfile: 'openrouter'
   }
 }
@@ -123,6 +176,46 @@ function createMemoryCuratorAgent(): AgentDefinition {
       'memory_merge_entities',
       'memory_archive_facts',
       'memory_link_identity'
+    ],
+    providerProfile: 'openrouter'
+  }
+}
+
+function createDeveloperAgent(): AgentDefinition {
+  let model = 'openai/gpt-4o-mini'
+  try {
+    model = getSettings().model || model
+  } catch {
+    // store not ready yet, use default
+  }
+
+  return {
+    id: 'developer',
+    name: 'Developer',
+    systemPrompt:
+      'You are a developer agent. You receive coding tasks and execute them using file system tools and a shell.\n\n' +
+      'All file paths are relative to lamp-data/.\n\n' +
+      'TOOLS:\n' +
+      '- read_file: read file contents (supports offset/limit)\n' +
+      '- write_file: create or overwrite a file\n' +
+      '- apply_patch: replace a unique string in a file\n' +
+      '- list_dir: list directory contents\n' +
+      '- search_files: regex search across files\n' +
+      '- delete_file: delete a file or directory\n' +
+      '- run_command: run a shell command with optional cwd and timeout\n' +
+      '- web_search: look up documentation or API references\n\n' +
+      'WORKFLOW:\n' +
+      '1. Read the task description carefully — it contains all necessary context and conventions\n' +
+      '2. Create or modify the required files\n' +
+      '3. Install dependencies if needed (npm install, pip install, etc.)\n' +
+      '4. Test your work with run_command\n' +
+      '5. If tests fail, read the error, fix the code, and re-test\n' +
+      '6. Report what you did when finished',
+    modelConfig: { model },
+    maxIterations: 20,
+    allowedTools: [
+      ...ALL_DEV_TOOL_IDS,
+      'web_search'
     ],
     providerProfile: 'openrouter'
   }
@@ -190,14 +283,35 @@ export function bootstrapAgentSystem(): AgentSystem {
   catalog.register(createGcalCreateEventTool(googleService))
   catalog.register(createGcalGetEventTool(googleService))
 
+  const integrationService = getGeneratedIntegrationService()
+  catalog.register(createListIntegrationsTool(integrationService))
+  catalog.register(createDeleteIntegrationTool(integrationService))
+
+  catalog.register(createReadFileTool())
+  catalog.register(createWriteFileTool())
+  catalog.register(createApplyPatchTool())
+  catalog.register(createListDirTool())
+  catalog.register(createSearchFilesTool())
+  catalog.register(createDeleteFileTool())
+  catalog.register(createRunCommandTool())
+
   const router = new SupervisorRouter({
     catalog,
     providerRegistry,
     bus
   })
 
+  catalog.register(createRunDeveloperTool(router))
+  catalog.register(createActivateIntegrationTool({
+    service: integrationService,
+    catalog,
+    router,
+    notify: notifyIntegrationChanged
+  }))
+
   router.registerAgent(createDefaultAgent())
   router.registerAgent(createMemoryCuratorAgent())
+  router.registerAgent(createDeveloperAgent())
 
   return {
     bus,
@@ -207,7 +321,8 @@ export function bootstrapAgentSystem(): AgentSystem {
     openRouterProvider,
     memoryGraph,
     factExtraction,
-    memoryGraphService
+    memoryGraphService,
+    integrationService
   }
 }
 

@@ -114,6 +114,23 @@ const agentPresetsAPI = {
     ipcRenderer.invoke('agent-preset:improve-prompt', draft) as Promise<string>
 }
 
+const integrationsAPI = {
+  list: () =>
+    ipcRenderer.invoke('integrations:list') as Promise<unknown[]>,
+  get: (id: string) =>
+    ipcRenderer.invoke('integrations:get', id),
+  approve: (id: string, envValues: Record<string, string>) =>
+    ipcRenderer.invoke('integrations:approve', id, envValues) as Promise<{ success: boolean; error?: string }>,
+  reject: (id: string) =>
+    ipcRenderer.invoke('integrations:reject', id),
+  delete: (id: string) =>
+    ipcRenderer.invoke('integrations:delete', id),
+  reinstall: (id: string) =>
+    ipcRenderer.invoke('integrations:reinstall', id) as Promise<{ success: boolean; error?: string }>,
+  onChanged: (cb: (data: unknown) => void) =>
+    ipcOn('integrations:changed', cb)
+}
+
 const api = {
   chat: chatAPI,
   agent: agentAPI,
@@ -121,7 +138,8 @@ const api = {
   telegram: telegramAPI,
   google: googleAPI,
   memory: memoryAPI,
-  agentPresets: agentPresetsAPI
+  agentPresets: agentPresetsAPI,
+  integrations: integrationsAPI
 }
 
 if (process.contextIsolated) {

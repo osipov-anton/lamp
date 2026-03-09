@@ -1,5 +1,69 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import type { Chat, ChatThread, MessageAttachment } from '@renderer/types'
+import type { Chat, ChatThread, MessageAttachment, ToolCallState, MemoryQueryHit } from '@renderer/types'
+
+function parseMemoryQueryHits(text: string): MemoryQueryHit[] | undefined {
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (!Array.isArray(parsed)) return undefined
+    return parsed
+      .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+      .map((item) => ({
+        factId: String(item.factId ?? ''),
+        statement: String(item.statement ?? ''),
+        factType: String(item.factType ?? ''),
+        confidence: Number(item.confidence ?? 0),
+        priority: Number(item.priority ?? 0),
+        score: Number(item.score ?? 0),
+        source: item.source === 'related' ? ('related' as const) : undefined
+      }))
+      .filter((item) => item.factId.length > 0 && item.statement.length > 0)
+  } catch {
+    return undefined
+  }
+}
+
+function hydrateStoredToolCalls(chat: Chat): Chat {
+  let changed = false
+  const threads = chat.threads.map((thread) => {
+    const messages = thread.messages.map((msg) => {
+      if (!msg.toolCalls || msg.toolCalls.length === 0) return msg
+      const tc0 = msg.toolCalls[0] as ToolCallState & { key?: string }
+      if (tc0.key) return msg
+      changed = true
+      return {
+        ...msg,
+        toolCalls: msg.toolCalls.map((tc: ToolCallState & Record<string, unknown>) => {
+          const callId = (tc.callId ?? tc['callId'] ?? '') as string
+          const toolName = (tc.toolName ?? tc['toolName'] ?? '') as string
+          const hydrated: ToolCallState = {
+            key: `stored:${callId}`,
+            runId: '',
+            callId,
+            toolId: toolName,
+            toolName,
+            status: tc.status,
+            statusText: tc.statusText,
+            elapsedMs: tc.elapsedMs ?? 0,
+            result: tc.result
+              ? {
+                  success: tc.result.success,
+                  content: tc.result.content,
+                  error: tc.result.error,
+                  memoryQueryHits:
+                    toolName === 'memory_query' && tc.result.content
+                      ? parseMemoryQueryHits(tc.result.content)
+                      : undefined
+                }
+              : undefined
+          }
+          return hydrated
+        })
+      }
+    })
+    return changed ? { ...thread, messages } : thread
+  })
+  return changed ? { ...chat, threads } : chat
+}
 
 export function useChats() {
   const [chats, setChats] = useState<Chat[]>([])
@@ -22,7 +86,7 @@ export function useChats() {
   )
 
   const loadChats = useCallback(async (): Promise<Chat[]> => {
-    const list = await window.api.chat.listChats()
+    const list = (await window.api.chat.listChats()).map(hydrateStoredToolCalls)
     setChats(list)
     return list
   }, [])

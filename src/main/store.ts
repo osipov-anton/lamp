@@ -23,12 +23,27 @@ export interface ChatThread {
   updatedAt: number
 }
 
+export interface StoredToolCall {
+  callId: string
+  toolName: string
+  arguments: string
+  status: 'completed' | 'failed' | 'cancelled'
+  statusText?: string
+  elapsedMs: number
+  result?: {
+    success: boolean
+    content?: string
+    error?: string
+  }
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: number
   attachments?: ChatAttachment[]
+  toolCalls?: StoredToolCall[]
 }
 
 export interface ChatAttachment {
@@ -158,7 +173,13 @@ export function addMessage(chatId: string, message: ChatMessage, threadId?: stri
   writeStore(data)
 }
 
-export function updateMessage(chatId: string, messageId: string, content: string, threadId?: string): void {
+export function updateMessage(
+  chatId: string,
+  messageId: string,
+  content: string,
+  threadId?: string,
+  toolCalls?: StoredToolCall[]
+): void {
   const data = readStore()
   const chat = data.chats.find((c) => c.id === chatId)
   if (!chat) return
@@ -167,6 +188,9 @@ export function updateMessage(chatId: string, messageId: string, content: string
   const msg = targetThread.messages.find((m) => m.id === messageId)
   if (!msg) return
   msg.content = content
+  if (toolCalls && toolCalls.length > 0) {
+    msg.toolCalls = toolCalls
+  }
   targetThread.updatedAt = Date.now()
   chat.updatedAt = Date.now()
   writeStore(data)

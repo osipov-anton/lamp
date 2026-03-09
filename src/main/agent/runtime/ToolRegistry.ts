@@ -7,6 +7,10 @@ export class ToolRegistry {
     this.tools.set(tool.id, tool)
   }
 
+  unregister(toolId: string): void {
+    this.tools.delete(toolId)
+  }
+
   get(toolId: string): ToolDefinition | undefined {
     return this.tools.get(toolId)
   }

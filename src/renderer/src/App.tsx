@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { TooltipProvider } from './components/ui/tooltip'
 import { Sidebar } from './components/Sidebar'
 import { ChatView } from './components/ChatView'
@@ -8,6 +8,7 @@ import { MemoryView } from './components/MemoryView'
 import { AgentsView } from './components/AgentsView'
 import { TelegramAuthDialog } from './components/TelegramAuthDialog'
 import { GoogleAuthDialog } from './components/GoogleAuthDialog'
+import { IntegrationApprovalDialog } from './components/IntegrationApprovalDialog'
 import { CommandPalette } from './components/CommandPalette'
 import { useChats } from './hooks/useChats'
 import { useAgentRun } from './hooks/useAgentRun'
@@ -38,13 +39,23 @@ function App(): JSX.Element {
     stopStreaming
   } = useChats()
 
-  const { run: mainRun } = useAgentRun(activeChatId, activeMainThread?.id ?? null)
-  const { run: sideRun } = useAgentRun(activeChatId, activeSideThread?.id ?? null)
+  const { run: mainRun, isActive: mainRunActive } = useAgentRun(activeChatId, activeMainThread?.id ?? null)
+  const { run: sideRun, isActive: sideRunActive } = useAgentRun(activeChatId, activeSideThread?.id ?? null)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [telegramAuthOpen, setTelegramAuthOpen] = useState(false)
   const [googleAuthOpen, setGoogleAuthOpen] = useState(false)
+  const [integrationApprovalOpen, setIntegrationApprovalOpen] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+
+  useEffect(() => {
+    return window.api.integrations.onChanged((data) => {
+      const integration = data as { status?: string }
+      if (integration.status === 'pending_approval') {
+        setIntegrationApprovalOpen(true)
+      }
+    })
+  }, [])
   
   const [currentView, setCurrentView] = useState<'chat' | 'integrations' | 'memory' | 'agents'>('chat')
 
@@ -158,8 +169,8 @@ function App(): JSX.Element {
             streamingChatId={streamingChatId}
             streamingThreadId={streamingThreadId}
             streamingContent={streamingContent}
-            mainToolCalls={mainRun.toolCalls}
-            sideToolCalls={sideRun.toolCalls}
+            mainToolCalls={mainRunActive ? mainRun.toolCalls : []}
+            sideToolCalls={sideRunActive ? sideRun.toolCalls : []}
             error={error}
             onSendMessage={sendMessage}
             onSendThreadMessage={sendThreadMessage}
@@ -192,6 +203,7 @@ function App(): JSX.Element {
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
         <TelegramAuthDialog open={telegramAuthOpen} onOpenChange={setTelegramAuthOpen} />
         <GoogleAuthDialog open={googleAuthOpen} onOpenChange={setGoogleAuthOpen} />
+        <IntegrationApprovalDialog open={integrationApprovalOpen} onOpenChange={setIntegrationApprovalOpen} />
       </div>
     </TooltipProvider>
   )

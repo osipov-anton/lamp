@@ -160,9 +160,9 @@ export class AgentRuntime {
         finalText = finalText || '(max iterations reached)'
         this.emitArtifact({ type: 'final', text: finalText })
         this.transition('completed')
-        this.bus.emit({ kind: 'run_complete', runId: this.runId, finalText })
       }
 
+      this.bus.emit({ kind: 'run_complete', runId: this.runId, finalText })
       return finalText
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
@@ -336,14 +336,15 @@ export class AgentRuntime {
           result.callId = tc.callId
           result.durationMs = Date.now() - startTime
           this.emitToolLifecycle(tc.callId, tc.toolId, result.success ? 'completed' : 'failed', {
-            elapsedMs: result.durationMs
+            elapsedMs: result.durationMs,
+            error: result.error
           })
           results.push(result)
         }
       } catch (err) {
         const elapsed = Date.now() - startTime
         const message = err instanceof Error ? err.message : 'Tool execution error'
-        this.emitToolLifecycle(tc.callId, tc.toolId, 'failed', { elapsedMs: elapsed })
+        this.emitToolLifecycle(tc.callId, tc.toolId, 'failed', { elapsedMs: elapsed, error: message })
         results.push({
           callId: tc.callId,
           toolId: tc.toolId,
@@ -394,7 +395,7 @@ export class AgentRuntime {
     toolId: string,
     status: ToolLifecycleEvent['status'],
     extra?: Partial<
-      Pick<ToolLifecycleEvent, 'statusText' | 'phase' | 'percent' | 'elapsedMs' | 'preview'>
+      Pick<ToolLifecycleEvent, 'statusText' | 'phase' | 'percent' | 'elapsedMs' | 'preview' | 'error'>
     >
   ): void {
     const event: ToolLifecycleEvent = {

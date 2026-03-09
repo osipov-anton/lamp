@@ -79,6 +79,7 @@ export function useAgentRun(activeChatId: string | null, activeThreadId: string 
         percent?: number
         elapsedMs: number
         preview?: string
+        error?: string
       }
       if (payload.chatId !== activeChatId) return
       if (payload.threadId !== activeThreadId) return
@@ -98,7 +99,10 @@ export function useAgentRun(activeChatId: string | null, activeThreadId: string 
                     phase: payload.phase ?? tc.phase,
                     percent: payload.percent ?? tc.percent,
                     elapsedMs: payload.elapsedMs,
-                    preview: payload.preview ?? tc.preview
+                    preview: payload.preview ?? tc.preview,
+                    result: payload.error
+                      ? { ...tc.result, success: false, error: payload.error }
+                      : tc.result
                   }
                 : tc
             )
@@ -117,7 +121,10 @@ export function useAgentRun(activeChatId: string | null, activeThreadId: string 
           phase: payload.phase,
           percent: payload.percent,
           elapsedMs: payload.elapsedMs,
-          preview: payload.preview
+          preview: payload.preview,
+          result: payload.error
+            ? { success: false, error: payload.error }
+            : undefined
         }
         return { ...prev, toolCalls: [...prev.toolCalls, newTc] }
       })
@@ -184,6 +191,13 @@ export function useAgentRun(activeChatId: string | null, activeThreadId: string 
           iteration: data.iteration
         }
       })
+
+      if (data.runId === rootRunIdRef.current && data.phase === 'cancelled') {
+        setIsActive(false)
+        streamRef.current = ''
+        thinkingRef.current = ''
+        rootRunIdRef.current = null
+      }
     })
 
     const unsubRunComplete = window.api.agent.onRunComplete((data) => {

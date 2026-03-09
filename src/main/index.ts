@@ -13,8 +13,9 @@ import { registerTelegramHandlers } from './ipc/telegram'
 import { registerGoogleHandlers } from './ipc/google'
 import { registerMemoryHandlers } from './ipc/memory'
 import { registerAgentPresetHandlers } from './ipc/agentPresets'
+import { registerIntegrationHandlers, loadApprovedIntegrations } from './ipc/integrations'
 import { bootstrapAgentSystem } from './agent/bootstrap'
-import { bridgeAgentEventsToIPC } from './ipc/agent'
+import { bridgeAgentEventsToIPC, ToolCallCollector } from './ipc/agent'
 import { getTelegramService } from './telegram'
 import { getGoogleService } from './google'
 
@@ -133,16 +134,20 @@ app.whenReady().then(() => {
   }
 
   try {
-    const { bus, router, openRouterProvider, memoryGraph } = bootstrapAgentSystem()
+    const { bus, router, openRouterProvider, memoryGraph, catalog, integrationService } = bootstrapAgentSystem()
+
+    const toolCallCollector = new ToolCallCollector()
 
     bridgeAgentEventsToIPC(bus, {
       getRunContext: (runId) => router.getRunContextForRun(runId)
-    })
+    }, toolCallCollector)
 
-    registerChatHandlers(router, openRouterProvider, memoryGraph)
+    registerChatHandlers(router, openRouterProvider, memoryGraph, toolCallCollector)
     registerSettingsHandlers()
     registerMemoryHandlers(memoryGraph)
     registerAgentPresetHandlers()
+    registerIntegrationHandlers(integrationService, catalog, router)
+    loadApprovedIntegrations(integrationService, catalog, router)
 
     const telegramService = getTelegramService()
     registerTelegramHandlers(telegramService)

@@ -10,6 +10,10 @@ export class GlobalToolCatalog {
     this.registry.register(tool)
   }
 
+  unregister(toolId: string): void {
+    this.registry.unregister(toolId)
+  }
+
   get(toolId: string): ToolDefinition | undefined {
     return this.registry.get(toolId)
   }

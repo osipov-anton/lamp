@@ -3,7 +3,6 @@ import { AgentRuntime } from '../runtime/AgentRuntime'
 import { ArtifactBus } from '../runtime/ArtifactBus'
 import { GlobalToolCatalog } from '../tools/GlobalToolCatalog'
 import { ProviderRegistry } from '../providers/ProviderRegistry'
-import { createInvokeAgentTool } from '../tools/invokeAgentTool'
 
 export interface SupervisorConfig {
   maxDepth: number
@@ -57,6 +56,13 @@ export class SupervisorRouter {
 
   getRunContextForRun(runId: string): { chatId: string; threadId: string } | undefined {
     return this.runContextByRunId.get(runId)
+  }
+
+  hasActiveRunsForChat(chatId: string): boolean {
+    for (const context of this.runContextByRunId.values()) {
+      if (context.chatId === chatId) return true
+    }
+    return false
   }
 
   cancelRunsForChat(chatId: string, threadId?: string): number {
@@ -129,11 +135,6 @@ export class SupervisorRouter {
     }
     const toolRegistry = this.catalog.createScopedRegistry(policy)
     console.log('[supervisor] scoped tools:', toolRegistry.getAll().map(t => t.id).join(', '))
-
-    const hasChildAgents = definition.allowedTools.includes('invoke_agent')
-    if (hasChildAgents) {
-      toolRegistry.register(createInvokeAgentTool(this))
-    }
 
     const runContext = {
       runId: crypto.randomUUID(),

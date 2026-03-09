@@ -1,6 +1,7 @@
 import { BrowserWindow } from 'electron'
 import type { ArtifactBusEvent } from '../agent/runtime/types'
 import type { ArtifactBus } from '../agent/runtime/ArtifactBus'
+import type { StoredToolCall } from '../store'
 
 export interface AgentBridgeCallbacks {
   getRunContext: (runId: string) => { chatId: string; threadId: string } | undefined
@@ -8,12 +9,108 @@ export interface AgentBridgeCallbacks {
   onRunError?: (runId: string, chatId: string, threadId: string, error: string) => void
 }
 
+interface CollectedEntry {
+  callId: string
+  toolName: string
+  arguments: string
+  status: StoredToolCall['status'] | 'started'
+  statusText?: string
+  elapsedMs: number
+  resultContent?: string
+  error?: string
+}
+
+/**
+ * Accumulates tool call data across ArtifactBus events so it can be
+ * persisted to the store when a run completes.  Keyed by chatId:threadId
+ * because a given thread can only have one active run at a time.
+ */
+export class ToolCallCollector {
+  private entries = new Map<string, Map<string, CollectedEntry>>()
+
+  private key(chatId: string, threadId: string): string {
+    return `${chatId}:${threadId}`
+  }
+
+  private ensure(chatId: string, threadId: string): Map<string, CollectedEntry> {
+    const k = this.key(chatId, threadId)
+    let m = this.entries.get(k)
+    if (!m) { m = new Map(); this.entries.set(k, m) }
+    return m
+  }
+
+  recordInput(chatId: string, threadId: string, callId: string, toolId: string, args: Record<string, unknown>): void {
+    const m = this.ensure(chatId, threadId)
+    const prev = m.get(callId)
+    m.set(callId, {
+      callId,
+      toolName: prev?.toolName ?? toolId,
+      arguments: JSON.stringify(args),
+      status: prev?.status ?? 'started',
+      elapsedMs: prev?.elapsedMs ?? 0,
+      statusText: prev?.statusText,
+      resultContent: prev?.resultContent,
+      error: prev?.error
+    })
+  }
+
+  recordLifecycle(chatId: string, threadId: string, callId: string, toolId: string, status: string, elapsedMs: number, statusText?: string, error?: string): void {
+    if (status !== 'completed' && status !== 'failed' && status !== 'cancelled') return
+    const m = this.ensure(chatId, threadId)
+    const prev = m.get(callId)
+    m.set(callId, {
+      callId,
+      toolName: prev?.toolName ?? toolId,
+      arguments: prev?.arguments ?? '{}',
+      status: status as StoredToolCall['status'],
+      statusText: statusText ?? prev?.statusText,
+      elapsedMs,
+      resultContent: prev?.resultContent,
+      error: error ?? prev?.error
+    })
+  }
+
+  recordResultText(chatId: string, threadId: string, callId: string, text: string): void {
+    const m = this.entries.get(this.key(chatId, threadId))
+    const entry = m?.get(callId)
+    if (!entry) return
+    entry.resultContent = entry.resultContent ? entry.resultContent + '\n' + text : text
+  }
+
+  drain(chatId: string, threadId: string): StoredToolCall[] {
+    const k = this.key(chatId, threadId)
+    const m = this.entries.get(k)
+    if (!m) return []
+
+    const result: StoredToolCall[] = []
+    for (const e of m.values()) {
+      if (e.status === 'started') continue
+      result.push({
+        callId: e.callId,
+        toolName: e.toolName,
+        arguments: e.arguments,
+        status: e.status,
+        statusText: e.statusText,
+        elapsedMs: e.elapsedMs,
+        result: {
+          success: e.status === 'completed',
+          content: e.resultContent,
+          error: e.error
+        }
+      })
+    }
+
+    this.entries.delete(k)
+    return result
+  }
+}
+
 /**
  * Bridges ArtifactBus events into Electron IPC channels.
  * Emits both `agent:*` events (new) and legacy `chat:*` events
  * so the existing renderer continues to work.
  */
-export function bridgeAgentEventsToIPC(bus: ArtifactBus, callbacks: AgentBridgeCallbacks): () => void {
+export function bridgeAgentEventsToIPC(bus: ArtifactBus, callbacks: AgentBridgeCallbacks, collector: ToolCallCollector): () => void {
   console.log('[ipc-bridge] subscribing to ArtifactBus events')
   return bus.subscribe((event) => {
     const runId = extractRunId(event)
@@ -64,47 +161,56 @@ export function bridgeAgentEventsToIPC(bus: ArtifactBus, callbacks: AgentBridgeC
         })
         break
 
-      case 'tool_lifecycle':
+      case 'tool_lifecycle': {
+        const le = event.event
         win.webContents.send('agent:tool-lifecycle', {
           chatId,
           threadId,
-          runId: event.event.runId,
-          agentId: event.event.agentId,
-          callId: event.event.callId,
-          toolId: event.event.toolId,
-          toolName: event.event.toolId,
-          status: event.event.status,
-          statusText: event.event.statusText,
-          phase: event.event.phase,
-          percent: event.event.percent,
-          elapsedMs: event.event.elapsedMs,
-          preview: event.event.preview,
-          timestamp: event.event.timestamp
+          runId: le.runId,
+          agentId: le.agentId,
+          callId: le.callId,
+          toolId: le.toolId,
+          toolName: le.toolId,
+          status: le.status,
+          statusText: le.statusText,
+          phase: le.phase,
+          percent: le.percent,
+          elapsedMs: le.elapsedMs,
+          preview: le.preview,
+          error: le.error,
+          timestamp: le.timestamp
         })
+        collector.recordLifecycle(chatId, threadId, le.callId, le.toolId, le.status, le.elapsedMs, le.statusText, le.error)
         break
+      }
 
-      case 'artifact':
-        if (event.artifact.content.type === 'tool_output_text') {
+      case 'artifact': {
+        const ac = event.artifact.content
+        if (ac.type === 'tool_input') {
+          collector.recordInput(chatId, threadId, ac.callId, ac.toolId, ac.arguments)
+        } else if (ac.type === 'tool_output_text') {
           win.webContents.send('agent:tool-result', {
             chatId,
             threadId,
             runId: event.artifact.runId,
-            callId: event.artifact.content.callId,
-            toolId: event.artifact.content.toolId,
-            text: event.artifact.content.text
+            callId: ac.callId,
+            toolId: ac.toolId,
+            text: ac.text
           })
-        } else if (event.artifact.content.type === 'tool_output_image') {
+          collector.recordResultText(chatId, threadId, ac.callId, ac.text)
+        } else if (ac.type === 'tool_output_image') {
           win.webContents.send('agent:image-attachment', {
             chatId,
             threadId,
             runId: event.artifact.runId,
-            callId: event.artifact.content.callId,
-            mimeType: event.artifact.content.mimeType,
-            filePath: event.artifact.content.filePath,
-            alt: event.artifact.content.alt
+            callId: ac.callId,
+            mimeType: ac.mimeType,
+            filePath: ac.filePath,
+            alt: ac.alt
           })
         }
         break
+      }
 
       case 'run_state_change':
         win.webContents.send('agent:run-state', {

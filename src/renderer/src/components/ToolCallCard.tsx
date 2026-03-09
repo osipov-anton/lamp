@@ -37,7 +37,8 @@ function isTerminal(status: ToolCallState['status']): boolean {
 }
 
 export function ToolCallCard({ toolCall }: ToolCallCardProps) {
-  const [expanded, setExpanded] = useState(false)
+  const hasFailed = toolCall.status === 'failed'
+  const [expanded, setExpanded] = useState(hasFailed)
   const Icon = TOOL_ICONS[toolCall.toolId]
   const terminal = isTerminal(toolCall.status)
 
@@ -45,9 +46,11 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
     <div
       className={cn(
         'rounded-lg border text-sm transition-colors',
-        terminal
-          ? 'border-border/30 bg-muted/20'
-          : 'border-white/10 bg-[#1A1A1A] shadow-sm shadow-black/10'
+        hasFailed
+          ? 'border-destructive/40 bg-destructive/5'
+          : terminal
+            ? 'border-border/30 bg-muted/20'
+            : 'border-white/10 bg-[#1A1A1A] shadow-sm shadow-black/10'
       )}
     >
       <button
@@ -94,7 +97,9 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
           )}
 
           {toolCall.result?.error && (
-            <p className="text-xs text-destructive">{toolCall.result.error}</p>
+            <pre className="text-xs text-destructive whitespace-pre-wrap break-words bg-destructive/10 rounded p-2 max-h-56 overflow-y-auto">
+              {toolCall.result.error}
+            </pre>
           )}
 
           {toolCall.toolId === 'memory_query' && toolCall.result?.memoryQueryHits && toolCall.result.memoryQueryHits.length > 0 && (

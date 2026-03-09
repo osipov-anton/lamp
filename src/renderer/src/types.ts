@@ -320,6 +320,52 @@ export interface MemoryAPI {
   deleteEntity: (entityId: string) => Promise<boolean>
 }
 
+// === Generated Integrations ===================================================
+
+export type IntegrationLanguage = 'typescript' | 'python'
+
+export type IntegrationStatus =
+  | 'pending_approval'
+  | 'installing'
+  | 'ready'
+  | 'install_failed'
+
+export interface IntegrationEnvVar {
+  name: string
+  description: string
+  required: boolean
+}
+
+export interface IntegrationToolSpec {
+  name: string
+  action: string
+  description: string
+}
+
+export interface GeneratedIntegration {
+  id: string
+  name: string
+  description: string
+  language: IntegrationLanguage
+  envVars: IntegrationEnvVar[]
+  tools: IntegrationToolSpec[]
+  status: IntegrationStatus
+  envValues: Record<string, string>
+  installError?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface IntegrationsAPI {
+  list: () => Promise<GeneratedIntegration[]>
+  get: (id: string) => Promise<GeneratedIntegration | null>
+  approve: (id: string, envValues: Record<string, string>) => Promise<{ success: boolean; error?: string }>
+  reject: (id: string) => Promise<void>
+  delete: (id: string) => Promise<void>
+  reinstall: (id: string) => Promise<{ success: boolean; error?: string }>
+  onChanged: (cb: (data: GeneratedIntegration) => void) => () => void
+}
+
 // === Agent Presets ============================================================
 
 export interface AgentPreset {
@@ -349,6 +395,7 @@ declare global {
       google: GoogleAPI
       memory: MemoryAPI
       agentPresets: AgentPresetsAPI
+      integrations: IntegrationsAPI
     }
   }
 }

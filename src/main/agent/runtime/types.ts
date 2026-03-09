@@ -144,6 +144,7 @@ export interface ToolLifecycleEvent {
   percent?: number
   elapsedMs: number
   preview?: string
+  error?: string
   timestamp: number
 }
 

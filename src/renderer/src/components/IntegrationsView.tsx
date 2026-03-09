@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
-import { Heart, Sparkles, CheckCircle2, ChevronRight, Zap } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Heart, Sparkles, CheckCircle2, ChevronRight, Zap, Code2, Trash2, RefreshCw, Loader2 } from 'lucide-react'
 import { Button } from './ui/button'
 import { ScrollArea } from './ui/scroll-area'
-import type { TelegramConnectionStatus, GoogleConnectionStatus } from '@renderer/types'
+import type { TelegramConnectionStatus, GoogleConnectionStatus, GeneratedIntegration } from '@renderer/types'
 import telegramLogo from '../assets/telegram.png'
 
 interface IntegrationsViewProps {
@@ -36,6 +36,14 @@ const comingSoonIntegrations = [
 export function IntegrationsView({ onOpenTelegramAuth, onOpenGoogleAuth }: IntegrationsViewProps) {
   const [telegramStatus, setTelegramStatus] = useState<TelegramConnectionStatus>('disconnected')
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus>('disconnected')
+  const [generatedIntegrations, setGeneratedIntegrations] = useState<GeneratedIntegration[]>([])
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [reinstallingId, setReinstallingId] = useState<string | null>(null)
+
+  const loadGenerated = useCallback(async () => {
+    const all = await window.api.integrations.list()
+    setGeneratedIntegrations(all.filter((i) => i.status !== 'pending_approval'))
+  }, [])
 
   useEffect(() => {
     window.api.telegram.getStatus().then(setTelegramStatus)
@@ -49,8 +57,28 @@ export function IntegrationsView({ onOpenTelegramAuth, onOpenGoogleAuth }: Integ
     return unsub
   }, [])
 
+  useEffect(() => {
+    loadGenerated()
+    const unsub = window.api.integrations.onChanged(() => { loadGenerated() })
+    return unsub
+  }, [loadGenerated])
+
   const isTelegramConnected = telegramStatus === 'connected'
   const isGoogleConnected = googleStatus === 'connected'
+
+  const handleDeleteIntegration = async (id: string) => {
+    setDeletingId(id)
+    await window.api.integrations.delete(id)
+    await loadGenerated()
+    setDeletingId(null)
+  }
+
+  const handleReinstall = async (id: string) => {
+    setReinstallingId(id)
+    await window.api.integrations.reinstall(id)
+    await loadGenerated()
+    setReinstallingId(null)
+  }
 
   return (
     <div className="flex-1 min-h-0 flex flex-col h-full bg-background overflow-hidden relative">
@@ -175,6 +203,94 @@ export function IntegrationsView({ onOpenTelegramAuth, onOpenGoogleAuth }: Integ
               </div>
             </div>
           </section>
+
+          {generatedIntegrations.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-semibold tracking-tight">Custom Integrations</h2>
+                <div className="text-sm text-muted-foreground">
+                  Created by the assistant
+                </div>
+              </div>
+
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-5">
+                {generatedIntegrations.map((integration) => (
+                  <div
+                    key={integration.id}
+                    className="group relative flex flex-col justify-between overflow-hidden rounded-[2rem] border border-border/40 bg-background/40 p-7 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl transition-all duration-500 hover:shadow-[0_8px_30px_rgba(139,92,246,0.12)] hover:border-violet-500/30"
+                  >
+                    <div className="absolute -top-24 -right-24 h-48 w-48 rounded-full bg-violet-500/15 blur-[3rem] transition-all duration-500 group-hover:bg-violet-500/25 group-hover:scale-110" />
+
+                    <div className="relative z-10">
+                      <div className="mb-6 inline-flex size-16 items-center justify-center rounded-2xl bg-gradient-to-b from-violet-500/10 to-violet-500/5 p-3 shadow-inner ring-1 ring-white/10 dark:ring-white/5">
+                        <Code2 className="size-8 text-violet-400 transition-transform duration-500 group-hover:scale-110" />
+                      </div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <h3 className="font-semibold text-xl tracking-tight">{integration.name}</h3>
+                        {integration.status === 'ready' ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20">
+                            <CheckCircle2 className="size-3.5" />
+                            Active
+                          </span>
+                        ) : integration.status === 'installing' ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-3 py-1 text-[11px] font-medium text-blue-400 ring-1 ring-blue-500/20">
+                            <Loader2 className="size-3.5 animate-spin" />
+                            Installing
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/10 px-3 py-1 text-[11px] font-medium text-red-400 ring-1 ring-red-500/20">
+                            Failed
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm font-medium text-violet-400/80 mb-3">
+                        {integration.language === 'typescript' ? 'TypeScript' : 'Python'} &middot; {integration.tools.length} tool{integration.tools.length !== 1 ? 's' : ''}
+                      </p>
+                      <p className="text-sm text-muted-foreground/80 leading-relaxed line-clamp-2">
+                        {integration.description}
+                      </p>
+                      {integration.installError && (
+                        <p className="text-xs text-red-400 mt-2 line-clamp-2">{integration.installError}</p>
+                      )}
+                    </div>
+
+                    <div className="relative z-10 mt-8 pt-6 border-t border-border/40 flex items-center justify-between">
+                      <div className="text-xs text-muted-foreground/60 font-medium tracking-wide uppercase">
+                        AI-generated
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {integration.status === 'install_failed' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full"
+                            disabled={reinstallingId === integration.id}
+                            onClick={() => handleReinstall(integration.id)}
+                          >
+                            {reinstallingId === integration.id ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <RefreshCw className="size-3.5" />
+                            )}
+                            Retry
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="rounded-full text-muted-foreground hover:text-red-400"
+                          disabled={deletingId === integration.id}
+                          onClick={() => handleDeleteIntegration(integration.id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section>
             <div className="flex items-center justify-between mb-8">

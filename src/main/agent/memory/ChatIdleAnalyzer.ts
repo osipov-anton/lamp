@@ -13,11 +13,12 @@ type MessageProvider = (chatId: string, threadId: string) => ThreadMessageSnapsh
 export class ChatIdleAnalyzer {
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private running = new Set<string>()
+  private retryMs = 30_000
 
   constructor(
     private readonly router: SupervisorRouter,
     private readonly getMessagesForThread: MessageProvider,
-    private readonly idleMs = 60_000
+    private readonly idleMs = 5 * 60_000
   ) {}
 
   schedule(chatId: string, threadId: string): void {
@@ -33,6 +34,16 @@ export class ChatIdleAnalyzer {
   private async runCurator(chatId: string, threadId: string): Promise<void> {
     const key = `${chatId}:${threadId}`
     if (this.running.has(key)) return
+
+    if (this.router.hasActiveRunsForChat(chatId)) {
+      console.log('[memory] deferring curator – active agent run in chat', chatId)
+      const timer = setTimeout(() => {
+        void this.runCurator(chatId, threadId)
+      }, this.retryMs)
+      this.timers.set(key, timer)
+      return
+    }
+
     this.running.add(key)
     try {
       const curator = this.router.getAgent('memory_curator')
